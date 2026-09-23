@@ -1,4 +1,4 @@
-import { createAiService } from './ai.js';
+import { createAiService } from './adaptive-ai.js';
 
 export class AiSettingsError extends Error {
   constructor(status, code, message) {
