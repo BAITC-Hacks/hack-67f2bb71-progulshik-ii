@@ -8,6 +8,7 @@ import {
   analysisSchema, teamSchema, proposalSchema, decisionSchema, CARD_FIELDS, FIELD_LABELS,
 } from './schema.js';
 import { RUBRIC, calculateRating, isFilled } from './scoring.js';
+import { AiSettingsError } from './ai-runtime.js';
 
 class ApiError extends Error {
   constructor(status, code, message, details) {
@@ -41,6 +42,34 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     levels: [{ min: 0, max: 39, level: 'draft' }, { min: 40, max: 69, level: 'working' }, { min: 70, max: 89, level: 'ready' }, { min: 90, max: 100, level: 'priority' }] }));
 
   app.post('/api/ai/analyze', async (req, res) => res.json(await ai.analyze(analysisSchema.parse(req.body))));
+
+  // Runtime credentials can only be managed from this local application's own page.
+  // Nothing in these routes returns credentials or writes them to persistent storage.
+  function localAiSettings(req, res, next) {
+    res.set('Cache-Control', 'no-store');
+    const address = req.socket.remoteAddress || '';
+    const loopback = address === '::1' || /^127\./.test(address) || /^::ffff:127\./.test(address);
+    let origin, hostname;
+    try { const local = new URL(`${req.protocol}://${req.get('host')}`); origin = local.origin; hostname = local.hostname; }
+    catch { return next(new ApiError(403, 'LOCAL_SETTINGS_ONLY', 'Откройте настройки на компьютере, где запущено приложение.')); }
+    if (!loopback || !['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+      return next(new ApiError(403, 'LOCAL_SETTINGS_ONLY', 'Настройки ИИ доступны только через localhost на компьютере, где запущено приложение.'));
+    }
+    if (req.method !== 'GET' && (req.get('origin') !== origin || req.get('x-ai-settings') !== 'local' || !req.is('application/json'))) {
+      return next(new ApiError(403, 'LOCAL_SETTINGS_ONLY', 'Измените настройки через окно «Настройки ИИ» в этом приложении.'));
+    }
+    if (typeof ai.getSettings !== 'function') return next(new ApiError(503, 'AI_SETTINGS_UNAVAILABLE', 'Настройки ИИ недоступны. Перезапустите обновлённое приложение.'));
+    next();
+  }
+  app.get('/api/ai/settings', localAiSettings, (_req, res) => res.json(ai.getSettings()));
+  app.post('/api/ai/settings', localAiSettings, async (req, res) => {
+    const body = req.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['apiKey', 'model'].includes(key))) {
+      throw new ApiError(400, 'INVALID_AI_SETTINGS', 'Укажите ключ и название модели в окне настроек.');
+    }
+    res.json(await ai.connect(body));
+  });
+  app.post('/api/ai/settings/demo', localAiSettings, (_req, res) => res.json(ai.disable()));
 
   app.get('/api/tasks', (req, res) => {
     const { status = 'published', topic, level, q } = req.query;
@@ -151,6 +180,7 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
   app.use(express.static(fileURLToPath(new URL('../frontend/', import.meta.url)), { dotfiles: 'deny', maxAge: 0 }));
   app.use((_req, _res, next) => next(new ApiError(404, 'NOT_FOUND', 'Такой адрес API не найден')));
   app.use((error, _req, res, _next) => {
+    if (error instanceof AiSettingsError) return res.status(error.status).json({ error: { code: error.code, message: error.message } });
     if (error instanceof ZodError) return res.status(400).json({ error: {
       code: 'VALIDATION_ERROR', message: 'Проверьте заполнение полей.',
       details: error.issues.map((issue) => ({ field: issue.path.join('.'), message: issue.message })),

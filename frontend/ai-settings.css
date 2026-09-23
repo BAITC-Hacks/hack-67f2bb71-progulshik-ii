@@ -1,0 +1,31 @@
+/* Изолированное окно подключения ИИ. */
+.ai-settings-dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 40px)}
+.ai-settings-dialog .modal-head{align-items:flex-start}
+.ai-settings-subtitle{font-size:12px;line-height:1.6;color:var(--muted);margin-top:6px}
+.ai-settings-content{display:grid;gap:20px}
+.ai-settings-status{padding:17px 18px;background:var(--lime-light);border:1px solid #e1ead7;border-radius:12px}
+.ai-settings-status .pill{padding-left:0;background:transparent;font-size:12px}
+.ai-settings-dialog .ai-settings-status p{font-size:12px;line-height:1.7;margin:7px 0 0;color:#6d7f64}
+.ai-settings-dialog .field .hint{font-size:11px;line-height:1.65;color:#778672}
+.ai-settings-dialog input[type=password]{font-family:Consolas,monospace;letter-spacing:.3px}
+.ai-settings-dialog input::placeholder{font-family:"Segoe UI",Arial,sans-serif;letter-spacing:normal;font-size:12px}
+.ai-settings-message{padding:12px 15px;border:1px solid #dfe6d9;border-radius:10px;background:#f7f9f4;font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+.ai-settings-message[hidden]{display:none}
+.ai-settings-message.error{color:var(--danger);background:#fff4f1;border-color:#f1d3cc}
+.ai-settings-message.success{color:#335b37;background:#f0f8e7;border-color:#dbe9ce}
+.ai-settings-note{display:flex;align-items:flex-start;gap:10px;border-top:1px solid var(--line);padding-top:18px}
+.ai-settings-note>.icon{margin-top:3px;color:#7b8c70}
+.ai-settings-dialog .ai-settings-note p{font-size:12px;line-height:1.75;margin:0;color:#6e7f65}
+.ai-settings-dialog .ai-settings-retention{font-size:11px;line-height:1.7;margin:0;color:#899480}
+.ai-settings-actions{gap:8px}
+.ai-settings-actions .ai-settings-demo{margin-right:auto}
+.ai-settings-actions .btn[hidden]{display:none}
+.ai-settings-dialog .spinner{width:15px;height:15px}
+@media(max-width:560px){
+  .ai-settings-dialog{max-height:calc(100dvh - 24px);width:calc(100vw - 24px)}
+  .ai-settings-actions{display:grid;grid-template-columns:1fr 1fr}
+  .ai-settings-actions .ai-settings-demo{margin-right:0}
+  .ai-settings-actions [data-ai-action=connect]{grid-column:1/-1;grid-row:1}
+  .ai-settings-dialog .modal-head,.ai-settings-dialog .modal-content{padding:20px}
+  .ai-settings-content{gap:17px}
+}

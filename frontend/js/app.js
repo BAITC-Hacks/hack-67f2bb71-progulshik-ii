@@ -9,7 +9,7 @@
   const service=S.service=DEMO?new S.DemoService():new S.HttpService();
   const collaborationPages=['catalog','team-proposals','business-proposals','teams'];
   const pages=['editor','tasks',...collaborationPages];
-  let collaboration=null,role='business';
+  let collaboration=null,aiSettings=null,role='business';
   try{if(S.storage.read('aisana.role.v1','business')==='team')role='team';}catch(_){/* A role preference can safely use its default. */}
   const icons={
     arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',back:'<path d="M19 12H5m5 5-5-5 5-5"/>',
@@ -151,7 +151,7 @@
       <div class="sidebar-note"><div class="note-icon">${i('spark')}</div><h3>Сначала ясность.<br>Потом решение.</h3><p>Хорошее описание помогает студентам понять вашу задачу и предложить подходящую идею.</p><button class="text-link" data-action="help">Как это работает ${i('arrow','sm')}</button></div>
       <div class="sidebar-bottom"><span class="dot"></span>${DEMO?'ЛОКАЛЬНАЯ ВЕРСИЯ':'СЕРВИС ПОДКЛЮЧЁН'} <span style="margin-left:auto">01</span></div>
     </aside>
-    <div class="main-shell"><header class="topbar" ${inert}><div class="breadcrumb">Рабочее пространство <span>/</span> <strong>${title}</strong></div><div class="topbar-right"><button class="pill ${DEMO||['mock','fallback'].includes(service.lastAi?.mode)?'orange':'outline'}" style="border:0;cursor:pointer" data-action="help"><span class="dot"></span>${e(serviceLabel())}</button>${DEMO?'<span class="mode-label">Бизнес</span>':`<label class="role-picker"><span>Режим демонстрации</span><select id="role-select" aria-label="Режим демонстрации"><option value="business" ${role==='business'?'selected':''}>Бизнес</option><option value="team" ${role==='team'?'selected':''}>Команда</option></select></label>`}</div></header>
+    <div class="main-shell"><header class="topbar" ${inert}><div class="breadcrumb">Рабочее пространство <span>/</span> <strong>${title}</strong></div><div class="topbar-right"><button class="pill ${DEMO||['mock','fallback'].includes(service.lastAi?.mode)?'orange':'outline'}" style="border:0;cursor:pointer" data-action="${DEMO?'help':'ai-settings'}" title="${e(serviceLabel())}"><span class="dot"></span>${DEMO?e(serviceLabel()):'Настройки ИИ'}</button>${DEMO?'<span class="mode-label">Бизнес</span>':`<label class="role-picker"><span>Режим демонстрации</span><select id="role-select" aria-label="Режим демонстрации"><option value="business" ${role==='business'?'selected':''}>Бизнес</option><option value="team" ${role==='team'?'selected':''}>Команда</option></select></label>`}</div></header>
     <main class="page" id="main" ${inert} aria-busy="${state.busy}">
       ${state.error?`<div class="error-banner" role="alert">${i('info')}<div><span>${e(state.error)}</span>${state.conflict?`<div class="row wrap recovery-actions">${btn('export-current','Скачать текущий JSON','secondary small','download')}${btn('reload-current','Загрузить сохранённую версию','secondary small','folder')}</div>`:''}${workspaceCorrupt&&!DEMO?`<div class="row wrap recovery-actions">${btn('reset-workspace','Сбросить локальный сеанс','secondary small')}</div>`:''}</div><button class="text-link" data-action="dismiss-error" aria-label="Закрыть ошибку">${i('close','sm')}</button></div>`:''}
       ${!S.storage.available?`<div class="error-banner" role="status">${i('info')}${DEMO?'Хранилище недоступно: данные живут только в этой вкладке. Экспортируйте JSON до закрытия.':'Автосохранение формы на устройстве недоступно. Сохраните черновик на сервере или скачайте JSON перед закрытием вкладки.'}</div>`:''}
@@ -278,6 +278,9 @@
     if(state.busy)return;
     if(!DEMO&&name.startsWith('collab-')){await collaboration.handleAction(name,element);return;}
     switch(name){
+      case 'ai-settings':
+        if(collaboration?.isBusy()){toast('Дождитесь завершения текущего действия.');return;}
+        if(aiSettings)await aiSettings.open();break;
       case 'help':help();break;
       case 'dismiss-error':state.error='';render();break;
       case 'reset-workspace':{
@@ -401,7 +404,7 @@
   });
   window.addEventListener('hashchange',()=>{const page=location.hash.slice(1);if(pages.includes(page))navigate(page);});
   window.addEventListener('pagehide',persist);
-  window.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'&&!dialog.open){event.preventDefault();if(state.page==='editor')action('save');}});
+  window.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'&&!dialog.open&&!document.getElementById('ai-settings-dialog')?.open){event.preventDefault();if(state.page==='editor')action('save');}});
   // Публичный интерфейс для общей оболочки. Не требует доступа к приватному state.
   S.editor={
     openTask:async id=>{await action('open-task',{dataset:{id}});},
@@ -412,6 +415,12 @@
   };
   if(!DEMO)collaboration=S.createCollaboration({service,e,i,btn,heading,openModal,toast,render,navigate,getRole:()=>role,openEditor:async id=>{
     role='business';S.storage.write('aisana.role.v1',role);await action('open-task',{dataset:{id}});
+  }});
+  if(!DEMO)aiSettings=S.createAiSettings({service,e,i,onChanged:settings=>{
+    service.lastAnalysis=null;
+    service.lastAi=settings.mode==='mock'?{mode:'mock',warnings:['Выбран демонстрационный режим. Вопросы создаются локальными правилами.']}:
+      settings.verified?{mode:'openai',warnings:[]}:null;
+    render();
   }});
   render();
   run('Открываем рабочее пространство…',async()=>{await refresh();if(!DEMO&&collaborationPages.includes(state.page))await collaboration.load(state.page);if(startupError)throw new Error(startupError);});

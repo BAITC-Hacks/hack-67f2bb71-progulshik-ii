@@ -16,14 +16,14 @@
   class HttpService {
     constructor(){this.kind='http';this.lastAi=null;this.metadata=new Map();this.lastAnalysis=null;}
 
-    async request(method,path,payload){
+    async request(method,path,payload,extraHeaders={}){
       if(typeof location!=='undefined'&&location.protocol==='file:')throw apiError('Откройте интерфейс через адрес работающего сервера.','FILE_PROTOCOL');
       const controller=new AbortController();
       const timeout=setTimeout(()=>controller.abort(),S.config.timeoutMs||35000);
       try{
         const response=await fetch((S.config.apiBaseUrl||'').replace(/\/$/,'')+path,{
           method,credentials:S.config.credentials||'same-origin',signal:controller.signal,
-          headers:{Accept:'application/json',...(payload===undefined?{}:{'Content-Type':'application/json'})},
+          headers:{Accept:'application/json',...(payload===undefined?{}:{'Content-Type':'application/json'}),...extraHeaders},
           ...(payload===undefined?{}:{body:JSON.stringify(payload)})
         });
         const text=await response.text();let data;
@@ -162,6 +162,9 @@
       return this.request('POST','/api/tasks/'+encodeURIComponent(taskId)+'/proposals',payload);
     }
     async decideProposal({id,status}){return this.request('PATCH','/api/proposals/'+encodeURIComponent(id),{status});}
+    async getAiSettings(){return this.request('GET','/api/ai/settings');}
+    async connectAiSettings(input){return this.request('POST','/api/ai/settings',input,{'X-AI-Settings':'local'});}
+    async disableAiSettings(){return this.request('POST','/api/ai/settings/demo',{}, {'X-AI-Settings':'local'});}
   }
   S.HttpService=HttpService;
 })(window.Sana);

@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { createStore } from './store.js';
 import { seedDemo } from './seed.js';
 import { createApp } from './app.js';
-import { createAiService } from './ai.js';
+import { createAiRuntime } from './ai-runtime.js';
 
 const port = Number(process.env.PORT || 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer between 1 and 65535');
@@ -11,7 +11,7 @@ if (!['mock', 'openai'].includes(mode)) throw new Error('AI_MODE must be mock or
 const host = process.env.HOST || '127.0.0.1';
 const store = createStore(resolve(process.env.DATABASE_PATH || './data/hub.sqlite'));
 if (process.env.SEED_DEMO !== 'false') seedDemo(store);
-const ai = createAiService({ mode, apiKey: process.env.OPENAI_API_KEY || '', model: process.env.OPENAI_MODEL || 'gpt-4o-mini', timeoutMs: Number(process.env.AI_TIMEOUT_MS || 20000) });
+const ai = createAiRuntime({ mode, apiKey: process.env.OPENAI_API_KEY || '', model: process.env.OPENAI_MODEL || 'gpt-4o-mini', timeoutMs: Number(process.env.AI_TIMEOUT_MS || 20000) });
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
 const server = createApp({ store, ai, allowedOrigins }).listen(port, host, () => {
   console.log(`AI Sana API: http://${host}:${port} (AI mode: ${mode})`);
