@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { createStore } from './store.js';
 import { seedDemo } from './seed.js';
-import { createApp } from './app.js';
+import { createWorkbenchApp as createApp } from './workbench-app.js';
 import { createAiRuntime } from './ai-runtime.js';
 
 const port = Number(process.env.PORT || 3001);
