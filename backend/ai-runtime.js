@@ -1,4 +1,5 @@
 import { createAiService } from './adaptive-ai.js';
+import { createSynthesisService } from './synthesis.js';
 
 export class AiSettingsError extends Error {
   constructor(status, code, message) {
@@ -77,6 +78,11 @@ export function createAiRuntime({
       const result = await capturedService.reviewCard(card);
       if (service === capturedService) verified = result.mode === 'openai';
       return result;
+    },
+    async synthesize(input) {
+      // A request captures the session settings; credentials never leave the server.
+      const synthesis = createSynthesisService({ mode: service.mode, apiKey: activeKey, model: activeModel, timeoutMs, fetchImpl });
+      return synthesis.synthesize(input);
     },
     async connect(settings = {}) {
       assertIdle();
