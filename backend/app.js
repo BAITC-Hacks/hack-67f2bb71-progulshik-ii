@@ -1,0 +1,150 @@
+import express from 'express';
+import cors from 'cors';
+import { randomUUID } from 'node:crypto';
+import { ZodError } from 'zod';
+import {
+  emptyCard, createTaskSchema, updateTaskSchema, confirmationSchema, revisionSchema,
+  analysisSchema, teamSchema, proposalSchema, decisionSchema, CARD_FIELDS, FIELD_LABELS,
+} from './schema.js';
+import { RUBRIC, calculateRating, isFilled } from './scoring.js';
+
+class ApiError extends Error {
+  constructor(status, code, message, details) {
+    super(message); this.status = status; this.code = code; this.details = details;
+  }
+}
+
+export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'] }) {
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(cors({ origin: allowedOrigins, methods: ['GET', 'POST', 'PATCH', 'OPTIONS'] }));
+  app.use(express.json({ limit: '128kb' }));
+
+  const find = (collection, id) => {
+    const item = store.get(collection, id);
+    if (!item) throw new ApiError(404, 'NOT_FOUND', 'Запись не найдена');
+    return item;
+  };
+  const viewTask = (task) => ({ ...task, rating: calculateRating(task.card, task.confirmedFields) });
+  const checkRevision = (task, revision) => {
+    if (task.revision !== revision) throw new ApiError(409, 'REVISION_CONFLICT', 'Карточка уже изменилась. Загрузите актуальную версию.', { currentRevision: task.revision });
+  };
+  const saveTask = (task) => {
+    const updated = { ...task, revision: task.revision + 1, updatedAt: new Date().toISOString() };
+    store.put('tasks', updated);
+    return viewTask(updated);
+  };
+
+  app.get('/', (_req, res) => res.type('text').send('AI Sana Challenge Hub: сервер работает. Проверка: /api/health. Каталог: /api/tasks. Интерфейс подключается отдельно.'));
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'ai-sana-challenge-hub', aiMode: ai.mode }));
+  app.get('/api/rubric', (_req, res) => res.json({ fields: FIELD_LABELS, criteria: RUBRIC,
+    levels: [{ min: 0, max: 39, level: 'draft' }, { min: 40, max: 69, level: 'working' }, { min: 70, max: 89, level: 'ready' }, { min: 90, max: 100, level: 'priority' }] }));
+
+  app.post('/api/ai/analyze', async (req, res) => res.json(await ai.analyze(analysisSchema.parse(req.body))));
+
+  app.get('/api/tasks', (req, res) => {
+    const { status = 'published', topic, level, q } = req.query;
+    if (![status, topic, level, q].every((value) => value === undefined || typeof value === 'string') ||
+        !['published', 'draft', 'all'].includes(status) ||
+        (level !== undefined && !['draft', 'working', 'ready', 'priority'].includes(level))) {
+      throw new ApiError(400, 'INVALID_FILTER', 'Некорректный фильтр каталога');
+    }
+    const search = q?.trim().toLocaleLowerCase('ru');
+    const items = store.list('tasks').filter((task) => status === 'all' || task.status === status)
+      .filter((task) => !topic || task.topic === topic).map(viewTask)
+      .filter((task) => !level || task.rating.level === level)
+      .filter((task) => !search || `${task.card.title} ${task.rawDescription} ${task.card.context} ${task.card.need}`.toLocaleLowerCase('ru').includes(search))
+      .sort((a, b) => b.rating.score - a.rating.score || b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    res.json({ items });
+  });
+
+  app.post('/api/tasks', (req, res) => {
+    const input = createTaskSchema.parse(req.body);
+    const now = new Date().toISOString();
+    const task = { id: randomUUID(), rawDescription: input.rawDescription, topic: input.topic,
+      card: { ...emptyCard(), ...input.card }, confirmedFields: [], status: 'draft', revision: 1,
+      createdAt: now, updatedAt: now, publishedAt: null };
+    store.put('tasks', task);
+    res.status(201).json(viewTask(task));
+  });
+  app.get('/api/tasks/:id', (req, res) => res.json(viewTask(find('tasks', req.params.id))));
+
+  app.patch('/api/tasks/:id', (req, res) => {
+    const input = updateTaskSchema.parse(req.body);
+    const task = find('tasks', req.params.id);
+    checkRevision(task, input.revision);
+    const card = { ...task.card, ...input.card };
+    const changedFields = CARD_FIELDS.filter((field) => card[field] !== task.card[field]);
+    const rawChanged = input.rawDescription !== undefined && input.rawDescription !== task.rawDescription;
+    const changed = changedFields.length > 0 || rawChanged || (input.topic !== undefined && input.topic !== task.topic);
+    if (!changed) return res.json(viewTask(task));
+    res.json(saveTask({ ...task, card, topic: input.topic ?? task.topic,
+      rawDescription: input.rawDescription ?? task.rawDescription,
+      confirmedFields: rawChanged ? [] : task.confirmedFields.filter((field) => !changedFields.includes(field)),
+      status: 'draft', publishedAt: null }));
+  });
+
+  app.post('/api/tasks/:id/confirm', (req, res) => {
+    const input = confirmationSchema.parse(req.body);
+    const task = find('tasks', req.params.id);
+    checkRevision(task, input.revision);
+    const empty = input.fields.filter((field) => !isFilled(task.card[field]));
+    if (empty.length) throw new ApiError(400, 'EMPTY_FIELDS', 'Нельзя подтвердить пустые поля или заглушки.', { fields: empty });
+    const confirmedFields = [...new Set([...task.confirmedFields, ...input.fields])];
+    res.json(saveTask({ ...task, confirmedFields }));
+  });
+
+  app.post('/api/tasks/:id/publish', (req, res) => {
+    const input = revisionSchema.parse(req.body);
+    const task = find('tasks', req.params.id);
+    checkRevision(task, input.revision);
+    if (!isFilled(task.card.title)) throw new ApiError(400, 'TITLE_REQUIRED', 'Укажите название задачи.');
+    const unconfirmed = CARD_FIELDS.filter((field) => isFilled(task.card[field]) && !task.confirmedFields.includes(field));
+    if (unconfirmed.length) throw new ApiError(400, 'CONFIRMATION_REQUIRED', 'Прочитайте и подтвердите все заполненные поля перед публикацией.', { fields: unconfirmed });
+    res.json(saveTask({ ...task, status: 'published', publishedAt: task.publishedAt ?? new Date().toISOString() }));
+  });
+
+  app.get('/api/teams', (_req, res) => res.json({ items: store.list('teams') }));
+  app.post('/api/teams', (req, res) => {
+    const input = teamSchema.parse(req.body);
+    const team = { id: randomUUID(), ...input };
+    store.put('teams', team);
+    res.status(201).json(team);
+  });
+
+  app.get('/api/tasks/:id/proposals', (req, res) => {
+    find('tasks', req.params.id);
+    res.json({ items: store.list('proposals').filter((proposal) => proposal.taskId === req.params.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
+  });
+  app.post('/api/tasks/:id/proposals', (req, res) => {
+    const input = proposalSchema.parse(req.body);
+    const task = find('tasks', req.params.id);
+    if (task.status !== 'published') throw new ApiError(400, 'TASK_NOT_PUBLISHED', 'Отклик доступен после публикации задачи.');
+    find('teams', input.teamId);
+    const now = new Date().toISOString();
+    const proposal = { id: randomUUID(), taskId: task.id, ...input, status: 'pending', createdAt: now, updatedAt: now };
+    store.put('proposals', proposal);
+    res.status(201).json(proposal);
+  });
+  app.patch('/api/proposals/:id', (req, res) => {
+    const input = decisionSchema.parse(req.body);
+    const proposal = find('proposals', req.params.id);
+    const updated = { ...proposal, status: input.status, updatedAt: new Date().toISOString() };
+    store.put('proposals', updated);
+    res.json(updated);
+  });
+
+  app.use((_req, _res, next) => next(new ApiError(404, 'NOT_FOUND', 'Такой адрес API не найден')));
+  app.use((error, _req, res, _next) => {
+    if (error instanceof ZodError) return res.status(400).json({ error: {
+      code: 'VALIDATION_ERROR', message: 'Проверьте заполнение полей.',
+      details: error.issues.map((issue) => ({ field: issue.path.join('.'), message: issue.message })),
+    } });
+    if (error.type === 'entity.parse.failed') return res.status(400).json({ error: { code: 'INVALID_JSON', message: 'Некорректный JSON в запросе.' } });
+    if (error.type === 'entity.too.large') return res.status(413).json({ error: { code: 'BODY_TOO_LARGE', message: 'Слишком большой запрос.' } });
+    if (error instanceof ApiError) return res.status(error.status).json({ error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) } });
+    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Не удалось обработать запрос. Повторите попытку.' } });
+  });
+  return app;
+}
