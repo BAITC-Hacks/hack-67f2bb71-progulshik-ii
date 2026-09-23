@@ -1,5 +1,6 @@
 import { CARD_FIELDS, FIELD_LABELS } from './schema.js';
 import { resolveQuality } from './quality.js';
+import { isMeaningful } from './interview.js';
 
 export const RUBRIC = [
   { id: 'contextAndNeed', label: 'Контекст и потребность', maxPoints: 20, fields: ['context', 'need'] },
@@ -11,11 +12,9 @@ export const RUBRIC = [
   { id: 'contact', label: 'Связь с бизнесом', maxPoints: 10, fields: ['contact', 'interactionFormat'] },
 ];
 
-export function isFilled(value) {
-  if (typeof value !== 'string') return false;
-  const normalized = value.trim().toLowerCase();
-  return /[\p{L}\p{N}]/u.test(normalized) && !['tbd', 'todo', 'не знаю', 'не указано', 'неизвестно'].includes(normalized);
-}
+// Normalize punctuation and whitespace without rejecting meaningful statements
+// such as "Ограничений по технологиям нет". Quality checking remains separate.
+export const isFilled = isMeaningful;
 
 export function readiness(score) {
   if (score >= 90) return { level: 'priority', label: 'Приоритетная' };

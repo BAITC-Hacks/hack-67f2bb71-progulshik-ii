@@ -14,7 +14,7 @@ export const interviewSchema = z.object({
   source: z.string().max(12000).default(''),
   questions: z.array(z.object({
     id: z.string().min(1).max(100), field: z.enum(CARD_FIELDS),
-    text: z.string().min(1).max(800), hint: z.string().max(800).default(''),
+    text: z.string().min(1).max(800), hint: z.string().max(2000).default(''),
   }).strict()).max(20)
     .refine((questions) => questions.length === 0 || questions.length >= 3, 'Сохраните минимум три вопроса')
     .refine((questions) => new Set(questions.map((question) => question.id)).size === questions.length, 'Идентификаторы вопросов должны различаться'),
@@ -43,6 +43,13 @@ export const analysisSchema = z.object({
   rawDescription: z.string().trim().min(10).max(12000),
   card: partialCardSchema.default({}),
   answers: partialCardSchema.default({}),
+  // Optional additions keep existing clients and stored cards compatible.
+  intent: z.enum(['clarify', 'improve']).optional(),
+  questionCount: z.number().int().min(3).max(8).optional(),
+  interviewHistory: z.array(z.object({
+    field: z.enum(CARD_FIELDS), question: z.string().trim().min(5).max(800),
+    status: z.enum(['answered', 'skipped']),
+  }).strict()).max(30).optional(),
 }).strict();
 export const teamSchema = z.object({
   name: z.string().trim().min(2).max(120),
