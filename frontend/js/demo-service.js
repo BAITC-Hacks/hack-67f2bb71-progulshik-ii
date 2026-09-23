@@ -1,6 +1,6 @@
 /* ЛОКАЛЬНАЯ ЗАГЛУШКА, НЕ ИИ И НЕ ВАШ BACKEND.
  * Все имитации бизнес-операций изолированы здесь, а не в коде экранов.
- * Деморейтинг проверяет присутствие подтверждённого текста, НЕ его качество.
+ * Проверка здесь ограничена простыми правилами автономной демонстрации.
  */
 (function (S) {
   'use strict';
@@ -22,19 +22,32 @@
     ['success_criteria','Как вы поймёте, что задача решена?','Укажите проверяемые признаки приёмки.'],
     ['constraints','Какие сроки и ограничения нужно учесть?','Технологии, доступы, сроки и другие рамки.']
   ];
+  function fieldQuality(key,value){
+    const text=value.trim(),words=text.match(/[\p{L}\p{N}]+/gu)||[];
+    if(!text)return {status:'empty',message:'Добавьте сведения, когда они станут известны.'};
+    if(!M.meaningful(text)||/^\d*[фыв]{3,}$/iu.test(text)||/^(.)\1{3,}$/u.test(text)||/^(?:asdf|qwer|йцук|фыва|test|тест|123)+$/iu.test(text))return {status:'invalid',message:'Укажите понятные сведения вместо заглушки или набора символов.'};
+    if(key==='title')return {status:'valid',message:'Название указано.'};
+    if(key==='contact')return /[^\s@]+@[^\s@]+\.[^\s@]+|https?:\/\/\S+|@[a-z\d_]{3,}|\+?[\d ()-]{7,}/iu.test(text)?{status:'valid',message:'Указан контакт для связи.'}:{status:'needs_detail',message:'Укажите рабочую почту, телефон или ссылку для связи.'};
+    if(key==='users'&&/^(?:диспетчер|администратор|ученики|студенты|преподаватели|учителя|водители|врачи|менеджеры|операторы|кассиры|бухгалтеры|курьеры)$/iu.test(text))return {status:'valid',message:'Указана конкретная роль пользователей.'};
+    if(key==='constraints'&&(/^(?:без ограничений|ограничений нет)[.!]?$/iu.test(text)||/(?:\d+|один|одна|два|две|три|четыре|пять)\s*(?:день|дня|дней|недел[яиюь]|месяц|час)/iu.test(text)))return {status:'valid',message:'Указан срок или явно описано отсутствие ограничений.'};
+    if(text.length<12||words.length<2)return {status:'needs_detail',message:'Добавьте конкретное пояснение: короткой записи недостаточно для оценки.'};
+    if(key==='success_criteria'&&!/\d|провер|ошиб|тест|при[её]м|сравн|доля|время|точност|работает|проходит|открыва|созда[её]т|наход|отправ/iu.test(text))return {status:'needs_detail',message:'Опишите проверяемый результат или измеримый критерий приёмки.'};
+    return {status:'valid',message:'Пройдена базовая локальная проверка. Смысл и достоверность проверьте вручную.'};
+  }
   function evaluate(task) {
-    const missing=[];
+    const missing=[],invalid=[];
+    const quality={version:1,cardFingerprint:M.fingerprint(task),mode:'local',fields:Object.fromEntries(M.fields.filter(field=>field.key!=='topic').map(field=>[field.key,fieldQuality(field.key,task[field.key])])),warnings:['Автономная демонстрация: доступны только простые правила. Для полной проверки запустите приложение через сервер.']};
     const breakdown=rubric.map(item=>{
       let earned=0; const absent=[];
       for(const [key,points] of item.parts){
-        if(M.meaningful(task[key])) earned+=points;
-        else { const field=M.fields.find(f=>f.key===key); absent.push(field.label); missing.push({key,label:field.label,suggestion:field.hint}); }
+        if(quality.fields[key].status==='valid') earned+=points;
+        else { const field=M.fields.find(f=>f.key===key); absent.push(field.label);if(quality.fields[key].status==='empty')missing.push({key,label:field.label,suggestion:field.hint});else invalid.push(key); }
       }
-      return {id:item.id,label:item.label,earned,max:item.parts.reduce((a,p)=>a+p[1],0),reason:absent.length?'Добавьте: '+absent.join(', '):'Заполнено и подтверждено пользователем.'};
+      return {id:item.id,label:item.label,earned,max:item.parts.reduce((a,p)=>a+p[1],0),reason:absent.length?'Уточните: '+absent.join(', '):'Пройдена базовая локальная проверка.'};
     });
     const total=breakdown.reduce((n,b)=>n+b.earned,0);
     const level=total>=90?{key:'priority',label:'Приоритетная'}:total>=70?{key:'ready',label:'Готовая'}:total>=40?{key:'working',label:'Рабочая'}:{key:'draft',label:'Требует уточнения'};
-    return {total_score:total,level,breakdown,missing_fields:missing,confirmed_at:new Date().toISOString(),source:'demo-presence-only'};
+    return {total_score:total,level,breakdown,missing_fields:missing,invalid_fields:invalid,quality,confirmed_at:new Date().toISOString(),source:'demo-local-basic'};
   }
   class DemoService {
     constructor(){this.memory=[];this.memoryOnly=false;this.failNext=false;this.kind='demo';}
@@ -45,7 +58,12 @@
     records(){
       const records=this.memoryOnly?this.memory:S.storage.read(KEY,this.memory);
       if(!Array.isArray(records)) throw new Error('Некорректное локальное хранилище. Сбросьте демоданные в справке.');
-      return M.clone(records.map(M.validateRecord));
+      return M.clone(records.map(record=>{
+        M.validateRecord(record);
+        if(record.rating&&record.confirmed_fingerprint===M.fingerprint(record.task)&&record.rating.quality?.version!==1)record.rating=evaluate(record.task);
+        if(record.published&&record.published.rating.quality?.version!==1)record.published.rating=evaluate(record.published.task);
+        return record;
+      }));
     }
     write(records){this.memory=M.clone(records);this.memoryOnly=!S.storage.write(KEY,records);}
     makeRecord(payload, list){

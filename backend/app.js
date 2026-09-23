@@ -9,6 +9,7 @@ import {
 } from './schema.js';
 import { RUBRIC, calculateRating, isFilled } from './scoring.js';
 import { AiSettingsError } from './ai-runtime.js';
+import { assessLocalQuality, resolveQuality } from './quality.js';
 
 class ApiError extends Error {
   constructor(status, code, message, details) {
@@ -27,7 +28,7 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     if (!item) throw new ApiError(404, 'NOT_FOUND', 'Запись не найдена');
     return item;
   };
-  const viewTask = (task) => ({ ...task, rating: calculateRating(task.card, task.confirmedFields) });
+  const viewTask = (task) => ({ ...task, rating: calculateRating(task.card, task.confirmedFields, task.qualityReview) });
   const checkRevision = (task, revision) => {
     if (task.revision !== revision) throw new ApiError(409, 'REVISION_CONFLICT', 'Карточка уже изменилась. Загрузите актуальную версию.', { currentRevision: task.revision });
   };
@@ -112,18 +113,26 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     res.json(saveTask({ ...task, card, topic: input.topic ?? task.topic,
       rawDescription: input.rawDescription ?? task.rawDescription,
       interview,
-      confirmedFields: rawChanged ? [] : task.confirmedFields.filter((field) => !changedFields.includes(field)),
+      // A changed field can change the meaning of the entire card. Review it again.
+      confirmedFields: changed ? [] : task.confirmedFields,
+      qualityReview: changed ? null : task.qualityReview,
       status: changed ? 'draft' : task.status, publishedAt: changed ? null : task.publishedAt }));
   });
 
-  app.post('/api/tasks/:id/confirm', (req, res) => {
+  app.post('/api/tasks/:id/confirm', async (req, res) => {
     const input = confirmationSchema.parse(req.body);
     const task = find('tasks', req.params.id);
     checkRevision(task, input.revision);
     const empty = input.fields.filter((field) => !isFilled(task.card[field]));
     if (empty.length) throw new ApiError(400, 'EMPTY_FIELDS', 'Нельзя подтвердить пустые поля или заглушки.', { fields: empty });
+    const review = typeof ai.reviewCard === 'function'
+      ? await ai.reviewCard(task.card)
+      : assessLocalQuality(task.card);
+    // The provider request may take time. Never overwrite a newer edit or review.
+    checkRevision(find('tasks', req.params.id), input.revision);
+    const qualityReview = { ...resolveQuality(task.card, review), checkedAt: new Date().toISOString() };
     const confirmedFields = [...new Set([...task.confirmedFields, ...input.fields])];
-    res.json(saveTask({ ...task, confirmedFields }));
+    res.json(saveTask({ ...task, confirmedFields, qualityReview }));
   });
 
   app.post('/api/tasks/:id/publish', (req, res) => {

@@ -1,4 +1,5 @@
 import { CARD_FIELDS, FIELD_LABELS } from './schema.js';
+import { resolveQuality } from './quality.js';
 
 export const RUBRIC = [
   { id: 'contextAndNeed', label: 'Контекст и потребность', maxPoints: 20, fields: ['context', 'need'] },
@@ -23,20 +24,24 @@ export function readiness(score) {
   return { level: 'draft', label: 'Требует уточнения' };
 }
 
-export function calculateRating(card, confirmedFields = []) {
+export function calculateRating(card, confirmedFields = [], qualityReview) {
   const confirmed = new Set(confirmedFields);
+  const quality = resolveQuality(card, qualityReview);
   const missingFields = CARD_FIELDS.filter((field) => !isFilled(card[field]));
   const unconfirmedFields = CARD_FIELDS.filter((field) => isFilled(card[field]) && !confirmed.has(field));
+  const invalidFields = CARD_FIELDS.filter((field) => isFilled(card[field]) && quality.fields[field].status !== 'valid');
   const breakdown = RUBRIC.map((criterion) => {
     const missing = criterion.fields.filter((field) => !isFilled(card[field]));
     const unconfirmed = criterion.fields.filter((field) => isFilled(card[field]) && !confirmed.has(field));
-    const earned = criterion.fields.filter((field) => isFilled(card[field]) && confirmed.has(field));
+    const invalid = criterion.fields.filter((field) => invalidFields.includes(field));
+    const earned = criterion.fields.filter((field) => isFilled(card[field]) && confirmed.has(field) && quality.fields[field].status === 'valid');
     const points = earned.length * (criterion.maxPoints / criterion.fields.length);
     const explanations = [];
     if (missing.length) explanations.push(`Добавьте: ${missing.map((field) => FIELD_LABELS[field]).join(', ')}`);
+    if (invalid.length) explanations.push(invalid.map((field) => `${FIELD_LABELS[field]}: ${quality.fields[field].message}`).join(' '));
     if (unconfirmed.length) explanations.push(`Подтвердите: ${unconfirmed.map((field) => FIELD_LABELS[field]).join(', ')}`);
-    return { ...criterion, points, missingFields: missing, unconfirmedFields: unconfirmed,
-      explanation: explanations.join('. ') || 'Сведения заполнены и подтверждены представителем бизнеса' };
+    return { ...criterion, points, missingFields: missing, unconfirmedFields: unconfirmed, invalidFields: invalid,
+      explanation: explanations.join('. ') || 'Содержание прошло проверку и подтверждено представителем бизнеса' };
   });
   const score = breakdown.reduce((sum, criterion) => sum + criterion.points, 0);
   const recommendations = breakdown.filter((criterion) => criterion.points < criterion.maxPoints)
@@ -44,5 +49,6 @@ export function calculateRating(card, confirmedFields = []) {
     .map((criterion) => `${criterion.explanation}. Можно получить ещё ${criterion.maxPoints - criterion.points} балл(ов).`);
   if (missingFields.includes('title')) recommendations.push('Добавьте название для публикации. Оно не влияет на рейтинг.');
   if (unconfirmedFields.includes('title')) recommendations.push('Подтвердите название перед публикацией.');
-  return { score, ...readiness(score), breakdown, missingFields, unconfirmedFields, recommendations };
+  if (invalidFields.includes('title')) recommendations.push(quality.fields.title.message);
+  return { score, ...readiness(score), breakdown, missingFields, unconfirmedFields, invalidFields, recommendations, quality };
 }

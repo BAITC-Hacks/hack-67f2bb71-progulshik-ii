@@ -44,13 +44,15 @@
 
     rating(value){
       if(!value||!Array.isArray(value.breakdown)||!Array.isArray(value.missingFields)||!Array.isArray(value.unconfirmedFields))throw apiError('Сервер вернул некорректную оценку.','INVALID_RESPONSE');
+      const quality=value.quality?{...value.quality,fields:Object.fromEntries(Object.entries(value.quality.fields||{}).map(([key,result])=>[uiField[key]||key,result]))}:null;
       return M.validateRating({total_score:value.score,level:{key:value.level,label:value.label},
-        breakdown:value.breakdown.map(item=>({id:item.id,label:item.label,earned:item.points,max:item.maxPoints,reason:item.explanation})),
+        breakdown:value.breakdown.map(item=>({id:item.id,label:item.label,earned:item.points,max:item.maxPoints,reason:item.explanation,invalid_fields:(item.invalidFields||[]).map(key=>uiField[key])})),
         missing_fields:value.missingFields.map(field=>{
           const key=uiField[field],definition=M.fields.find(item=>item.key===key);
           return {key,label:definition?.label||field,suggestion:definition?.hint||'Добавьте сведения в карточку.'};
         }),
         unconfirmed_fields:value.unconfirmedFields.map(field=>uiField[field]),
+        invalid_fields:(value.invalidFields||[]).map(field=>uiField[field]),quality,
         recommendations:Array.isArray(value.recommendations)?M.clone(value.recommendations):[],source:'server'});
     }
 
@@ -127,11 +129,11 @@
     async confirmAndEvaluate(payload){
       const saved=await this.save(payload);
       try{
-        const fields=saved.value.rating.unconfirmedFields;
-        if(!fields.length){
-          if(!saved.value.confirmedFields.length)throw apiError('Заполните хотя бы одно поле карточки перед подтверждением.','NOTHING_TO_CONFIRM');
-          return saved.record;
-        }
+        // Every explicit confirmation reassesses quality, including previously
+        // confirmed cards and a retry after connecting the AI provider.
+        const fields=[...new Set([...saved.value.confirmedFields,...saved.value.rating.unconfirmedFields])]
+          .filter(field=>Object.values(fieldMap).includes(field)&&typeof saved.value.card[field]==='string'&&saved.value.card[field].trim());
+        if(!fields.length)throw apiError('Заполните хотя бы одно поле карточки перед подтверждением.','NOTHING_TO_CONFIRM');
         return this.record(await this.request('POST','/api/tasks/'+encodeURIComponent(saved.record.id)+'/confirm',{
           revision:saved.record.revision,fields
         }));

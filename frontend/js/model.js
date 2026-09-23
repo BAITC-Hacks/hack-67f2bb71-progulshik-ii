@@ -55,6 +55,14 @@
     for (const m of r.missing_fields) if (!fields.some(f=>f.key===m.key) || typeof m.label !== 'string' || typeof m.suggestion !== 'string') throw new Error('Некорректный список недостающих сведений.');
     if (r.unconfirmed_fields != null && (!Array.isArray(r.unconfirmed_fields) || r.unconfirmed_fields.some(key=>!fields.some(f=>f.key===key)))) throw new Error('Некорректный список неподтверждённых полей.');
     if (r.recommendations != null && (!Array.isArray(r.recommendations) || r.recommendations.some(value=>typeof value!=='string'))) throw new Error('Некорректные рекомендации по карточке.');
+    if (r.invalid_fields != null && (!Array.isArray(r.invalid_fields) || r.invalid_fields.some(key=>!fields.some(f=>f.key===key)))) throw new Error('Некорректный список замечаний к полям.');
+    if (r.quality != null) {
+      const q=r.quality;
+      if(q.version!==1||!['local','openai','fallback'].includes(q.mode)||!q.fields||typeof q.fields!=='object'||Array.isArray(q.fields)||!Array.isArray(q.warnings)||q.warnings.some(text=>typeof text!=='string'))throw new Error('Некорректный результат проверки качества.');
+      const expected=fields.filter(field=>field.key!=='topic').map(field=>field.key);
+      if(Object.keys(q.fields).length!==expected.length||expected.some(key=>!Object.prototype.hasOwnProperty.call(q.fields,key)))throw new Error('Неполная проверка полей карточки.');
+      for(const [key,result] of Object.entries(q.fields))if(!expected.includes(key)||!result||typeof result!=='object'||Array.isArray(result)||!['valid','needs_detail','invalid','empty'].includes(result.status)||typeof result.message!=='string'||!result.message.trim())throw new Error('Некорректное замечание к полю карточки.');
+    }
     return r;
   }
   function validateRecord(r) {

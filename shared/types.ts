@@ -2,13 +2,22 @@ export type CardField = 'title' | 'context' | 'need' | 'users' | 'data' | 'const
 export type Card = Record<CardField, string>;
 export type ReadinessLevel = 'draft' | 'working' | 'ready' | 'priority';
 export type TaskStatus = 'draft' | 'published';
+export type QualityStatus = 'valid' | 'needs_detail' | 'invalid' | 'empty';
+export interface QualityReport {
+  version: 1;
+  cardFingerprint: string;
+  mode: 'local' | 'openai' | 'fallback';
+  fields: Record<CardField, { status: QualityStatus; message: string }>;
+  warnings: string[];
+}
 export interface ScoreCriterion {
   id: string; label: string; maxPoints: number; points: number;
-  fields: CardField[]; missingFields: CardField[]; unconfirmedFields: CardField[]; explanation: string;
+  fields: CardField[]; missingFields: CardField[]; unconfirmedFields: CardField[]; invalidFields: CardField[]; explanation: string;
 }
 export interface Rating {
   score: number; level: ReadinessLevel; label: string;
-  breakdown: ScoreCriterion[]; missingFields: CardField[]; unconfirmedFields: CardField[];
+  breakdown: ScoreCriterion[]; missingFields: CardField[]; unconfirmedFields: CardField[]; invalidFields: CardField[];
+  quality: QualityReport;
   recommendations: string[];
 }
 export interface BusinessTask {
@@ -16,6 +25,7 @@ export interface BusinessTask {
   confirmedFields: CardField[]; status: TaskStatus; revision: number;
   createdAt: string; updatedAt: string; publishedAt: string | null;
   rating: Rating;
+  qualityReview?: (QualityReport & { checkedAt: string }) | null;
   interview?: { source: string; questions: Array<{ id: string; field: CardField; text: string; hint: string }>; answers: Record<string, string> };
 }
 export interface Team {

@@ -79,9 +79,9 @@
       JSON.stringify(state.questions)!==JSON.stringify(state.record.questions||[])||
       JSON.stringify(state.answers)!==JSON.stringify(state.record.answers||{});
   }
-  function current(){return !!state.rating&&state.confirmedFingerprint===M.fingerprint(state.task);}
+  function current(){return !!state.rating&&state.rating.quality?.version===1&&state.confirmedFingerprint===M.fingerprint(state.task);}
   function alreadyPublished(){return !!state.record?.published&&M.fingerprint(state.record.published.task)===M.fingerprint(state.task);}
-  function recordFresh(r){return !!r.rating&&r.confirmed_fingerprint===M.fingerprint(r.task);}
+  function recordFresh(r){return !!r.rating&&r.rating.quality?.version===1&&r.confirmed_fingerprint===M.fingerprint(r.task);}
   function takeRecord(r){
     M.validateRecord(r);state.id=r.id;state.revision=r.revision;state.task=M.clone(r.task);state.rating=r.rating;state.confirmedFingerprint=r.confirmed_fingerprint;state.record=M.clone(r);
     state.questions=M.clone(r.questions||[]);state.answers=M.clone(r.answers||{});
@@ -192,25 +192,36 @@
       <div class="form-footer">${btn('back-description','Назад','ghost','back')}${btn('build','Сформировать карточку','primary','arrow')}</div></section>`;
   }
   function field(key){
-    const f=fieldByKey(key),value=state.task[key];
-    return `<div class="field ${!['title','topic','users','contact','interaction_format'].includes(key)?'full':''}" id="field-${key}"><label for="card-${key}">${e(f.label)}${key==='title'?'<span class="optional">нужно для публикации</span>':''}</label>${f.kind==='select'?topicSelect(value,'card-'+key,'data-task="'+key+'"'):f.kind==='input'?`<input id="card-${key}" data-task="${key}" maxlength="${f.max}" value="${e(value)}" placeholder="${e(f.hint||'')}">`:`<textarea id="card-${key}" data-task="${key}" maxlength="${f.max}" placeholder="${e(f.hint||'')}">${e(value)}</textarea>`}</div>`;
+    const f=fieldByKey(key),value=state.task[key],result=current()?state.rating.quality?.fields[key]:null;
+    const invalid=result&&['invalid','needs_detail'].includes(result.status);
+    const attributes=result?` aria-describedby="quality-${key}"${invalid?' aria-invalid="true"':''}`:'';
+    return `<div class="field ${!['title','topic','users','contact','interaction_format'].includes(key)?'full':''}" id="field-${key}"><label for="card-${key}">${e(f.label)}${key==='title'?'<span class="optional">нужно для публикации</span>':''}</label>${f.kind==='select'?topicSelect(value,'card-'+key,'data-task="'+key+'"'):f.kind==='input'?`<input id="card-${key}" data-task="${key}" maxlength="${f.max}" value="${e(value)}" placeholder="${e(f.hint||'')}"${attributes}>`:`<textarea id="card-${key}" data-task="${key}" maxlength="${f.max}" placeholder="${e(f.hint||'')}"${attributes}>${e(value)}</textarea>`}<div data-quality-for="${key}">${qualityFeedback(key)}</div></div>`;
+  }
+  function qualityFeedback(key){
+    const result=current()?state.rating.quality?.fields[key]:null;
+    if(!result)return '';
+    const labels={valid:'Есть содержательные сведения',needs_detail:'Нужны подробности',invalid:'Нужно исправить',empty:'Не заполнено'};
+    return `<p id="quality-${key}" class="field-quality ${result.status}"><strong>${e(labels[result.status])}.</strong> ${e(result.message)}</p>`;
   }
   function cardPage(){return `
     ${state.record?.published?`<div class="inline-notice">${i('globe')}${DEMO?'В каталоге уже есть опубликованная версия. Правки появятся там только после повторного подтверждения и публикации.':'Задача опубликована. Сохранение изменений вернёт её в черновики и уберёт из каталога. Затем подтвердите сведения и опубликуйте задачу заново.'}</div>`:''}
-    <div id="stale-note" class="stale-note" ${state.rating&&!current()?'':'hidden'}>${i('info')}${DEMO?'Есть неподтверждённые изменения. Оценка относится к предыдущей версии.':'Проверьте и подтвердите актуальную карточку. Показанная оценка учитывает только сведения, уже подтверждённые на сервере.'}</div>
+    <div id="stale-note" class="stale-note" ${state.rating&&!current()?'':'hidden'}>${i('info')}Карточка требует повторной проверки. Подтвердите текущие сведения, чтобы получить актуальную оценку.</div>
     ${M.groups.map((g,n)=>`<section class="card"><div class="card-body"><div class="card-heading"><div><h2>${g.title}</h2><p>${g.subtitle}</p></div><span class="section-no">0${n+1}</span></div><div class="field-grid">${g.keys.map(field).join('')}</div></div></section>`).join('')}
-    <div class="card confirmation"><label class="checkbox-line"><input id="confirm-checkbox" type="checkbox" ${state.ack?'checked':''}><span>Я проверил сведения в карточке и подтверждаю заполненные поля.</span></label><p>Пустые поля не добавляют баллов. Низкий рейтинг не запрещает публикацию.</p></div>
+    <div class="card confirmation"><label class="checkbox-line"><input id="confirm-checkbox" type="checkbox" ${state.ack?'checked':''}><span>Я проверил сведения в карточке и подтверждаю заполненные поля.</span></label><p>После подтверждения система проверит содержание полей. Пустой или неясный ответ не добавляет баллов. Низкий рейтинг не запрещает публикацию.</p></div>
     <div class="action-bar">${btn('back-questions','Назад','ghost','back')}<div class="row">${btn('confirm','Подтвердить и оценить','secondary','check',`id="confirm-button" ${!state.ack?'disabled':''}`)}${btn('publish',alreadyPublished()&&current()?'Опубликовано':'Опубликовать','primary','send',`id="publish-button" ${!current()||alreadyPublished()?'disabled':''}`)}</div></div>`;}
   function ratingAside(){
-    const r=state.rating,ok=current(),unconfirmed=(r?.unconfirmed_fields||[]).map(item=>typeof item==='string'?fieldByKey(item):{key:item.key,label:item.label}).filter(Boolean);
-    return `<aside class="aside sticky" aria-label="Рейтинг готовности"><section class="card score-card"><div class="score-header"><h3>Готовность задачи</h3><button type="button" class="text-link" data-action="help" aria-label="Как считается рейтинг">${i('info','sm')}</button></div>
-      <div class="score-ring ${r&&!ok?'stale':''}" style="--score:${r?.total_score||0}" role="img" aria-label="${r?'Последняя оценка: '+r.total_score+' из 100':'Оценка ещё не рассчитана'}"><div class="score-value"><b>${r?r.total_score:'—'}</b><small>из 100 баллов</small></div></div>
-      <div class="score-level"><span id="score-level" class="pill ${!r||!ok?'gray':''}">${r?(ok?e(r.level.label):(DEMO?'Предыдущая оценка':'Требует подтверждения')):'Ожидает подтверждения'}</span></div>
-      <p class="score-summary">${ok?'Оценка рассчитана по подтверждённым сведениям. Дополните карточку, чтобы повысить её готовность.':'Проверьте карточку и подтвердите заполненные поля для расчёта рейтинга.'}</p>
-      ${r?`<div class="rubric">${r.breakdown.map(b=>`<div class="rubric-item" title="${e(b.reason||'')}"><div class="row"><span>${e(b.label)}</span><b>${b.earned} / ${b.max}</b></div><div class="rubric-track"><span style="width:${b.max?Math.max(0,Math.min(100,b.earned/b.max*100)):0}%"></span></div></div>`).join('')}</div>`:`<div class="pending-score">Система оценит контекст, данные, результат, критерии успеха, ограничения, пользователей и связь с бизнесом.</div>`}
-      ${DEMO?'<p class="privacy-note" style="margin-top:17px">Демооценка: проверяется наличие текста, а не его смысл. После подключения используем рейтинг вашего сервера.</p>':''}
+    const ok=current(),r=ok?state.rating:null,quality=r?.quality;
+    const issues=quality?Object.entries(quality.fields).filter(([,result])=>result.status!=='valid').map(([key,result])=>({key,label:fieldByKey(key)?.label||key,suggestion:result.message})):r?.missing_fields||[];
+    const modeLabel=quality?({openai:'Проверка содержания: ИИ',local:'Проверка содержания: локальные правила',fallback:'Проверка содержания: резервные локальные правила'}[quality.mode]):'';
+    return `<aside id="rating-aside" class="aside sticky" aria-label="Рейтинг готовности"><section class="card score-card"><div class="score-header"><h3>Готовность задачи</h3><button type="button" class="text-link" data-action="help" aria-label="Как считается рейтинг">${i('info','sm')}</button></div>
+      <div class="score-ring" style="--score:${r?.total_score||0}" role="img" aria-label="${r?'Оценка: '+r.total_score+' из 100':'Требуется проверка текущей карточки'}"><div class="score-value"><b>${r?r.total_score:'—'}</b><small>из 100 баллов</small></div></div>
+      <div class="score-level"><span id="score-level" class="pill ${r?'':'gray'}">${r?e(r.level.label):state.rating?'Нужна повторная проверка':'Ожидает подтверждения'}</span></div>
+      <p class="score-summary">${r?'Баллы начислены за подтверждённые сведения, прошедшие проверку содержания.':'Подтвердите текущую карточку. До повторной проверки прежние баллы и замечания скрыты.'}</p>
+      ${quality?`<p class="quality-mode">${e(modeLabel)}</p>${quality.warnings.map(text=>`<p class="quality-warning">${e(text)}</p>`).join('')}`:''}
+      ${r?`<div class="rubric">${r.breakdown.map(b=>`<div class="rubric-item"><div class="row"><span>${e(b.label)}</span><b>${b.earned} / ${b.max}</b></div><div class="rubric-track"><span style="width:${b.max?Math.max(0,Math.min(100,b.earned/b.max*100)):0}%"></span></div><p class="rubric-reason">${e(b.reason||'')}</p></div>`).join('')}</div>`:`<div class="pending-score">Система оценит контекст, данные, результат, критерии успеха, ограничения, пользователей и связь с бизнесом.</div>`}
+      ${DEMO?'<p class="privacy-note" style="margin-top:17px">Автономная версия применяет только простые правила. Полная проверка доступна при запуске приложения через сервер.</p>':''}
       </section>
-      ${r?`<section class="card missing"><h3>${r.missing_fields.length?'Что можно дополнить':unconfirmed.length?'Нужно подтверждение':'Все сведения заполнены'}</h3><p class="tiny muted">${r.missing_fields.length?(DEMO?'По последней подтверждённой версии.':'По последней сохранённой карточке.'):'Проверьте, что формулировки понятны команде.'}</p>${r.missing_fields.map(m=>`<div class="missing-item"><span>${e(m.label)}</span><button type="button" class="text-link" data-action="focus-field" data-id="${e(m.key)}">Дополнить ${i('arrow','sm')}</button></div>`).join('')}${unconfirmed.length?`<p class="privacy-note">Подтвердите заполненные поля: ${unconfirmed.map(f=>e(f.label)).join(', ')}.</p>`:''}${Array.isArray(r.recommendations)&&r.recommendations.length?`<details class="rating-recommendations"><summary>Как повысить готовность</summary>${r.recommendations.map(text=>`<p>${e(text)}</p>`).join('')}</details>`:''}</section>`:''}
+      ${r?`<section class="card missing"><h3>${issues.length?'Что нужно уточнить':'Проверка завершена'}</h3><p class="tiny muted">${issues.length?'За недостаточно ясные сведения баллы не начислены.':'Явных замечаний к заполненным сведениям не найдено. Оценка не подтверждает достоверность фактов.'}</p>${issues.map(m=>`<div class="missing-item quality-issue"><div><strong>${e(m.label)}</strong><p>${e(m.suggestion)}</p></div><button type="button" class="text-link" data-action="focus-field" data-id="${e(m.key)}">Исправить ${i('arrow','sm')}</button></div>`).join('')}${Array.isArray(r.recommendations)&&r.recommendations.length?`<details class="rating-recommendations"><summary>Как повысить готовность</summary>${r.recommendations.map(text=>`<p>${e(text)}</p>`).join('')}</details>`:''}</section>`:''}
       <section class="card aside-info"><div class="info-icon">${i('eye')}<h3>Посмотрите глазами команды</h3></div><p>Перед публикацией проверьте, достаточно ли контекста, чтобы предложить решение.</p><div class="row wrap" style="margin-top:14px">${btn('preview-working','Предпросмотр','secondary small','eye')}${btn('export-current','JSON','ghost small','download')}</div></section></aside>`;
   }
   function successPage(){return heading('НОВЫЙ ШАГ К СОТРУДНИЧЕСТВУ','Задача готова<br>к знакомству с командами.',DEMO?'Публикация выполнена в локальном демонстрационном каталоге.':'Публикация подтверждена сервером.',btn('new','Новая задача','secondary','plus'))+demoStrip()+`<section class="card success-block"><div class="success-icon">${i('check')}</div><h2>${DEMO?'Опубликовано в демокаталоге':'Задача опубликована'}</h2><p>${DEMO?'Реальные студенты пока не увидят эту задачу. Сейчас она доступна только в вашем браузере.':'Команды могут просмотреть опубликованную задачу.'}</p><div class="success-card-name">${e(state.task.title)} <span class="pill" style="margin-left:8px">${state.rating.total_score} / 100</span></div><div class="row">${btn('goto-catalog','Открыть каталог','primary','arrow')}${btn('return-editor','Вернуться к карточке','secondary','edit')}${btn('export-current','Экспорт JSON','ghost','download')}</div></section>`;}
@@ -235,7 +246,7 @@
   }
   function taskRow(r){
     const fresh=recordFresh(r);
-    return `<article class="card task-row"><div class="score-tile" title="Последняя оценка сохранённых сведений"><strong>${r.rating?r.rating.total_score:'—'}</strong><small>${r.rating?(fresh?'из 100':'не подтверждено'):'не оценена'}</small></div><div class="task-info"><h3>${e(r.task.title||'Задача без названия')}</h3><p>${e((r.task.context||r.task.description||'Описание ещё не добавлено').slice(0,135))}${(r.task.context||r.task.description||'').length>135?'…':''}</p><div class="row"><span class="pill ${r.published?'':'gray'}">${r.published?'Опубликована':'Черновик'}</span>${r.task.topic?`<span class="pill outline">${e(r.task.topic)}</span>`:''}${r.rating&&!fresh?'<span class="pill orange">Есть правки</span>':''}<small class="muted">${new Date(r.updated_at).toLocaleDateString('ru-RU')}</small></div></div><div class="task-actions">${btn('open-task','Редактировать','secondary small','edit',`data-id="${e(r.id)}"`)}${btn('export-task','JSON','ghost small','download',`data-id="${e(r.id)}"`)}</div></article>`;
+    return `<article class="card task-row"><div class="score-tile" title="Оценка подтверждённых сведений"><strong>${fresh?r.rating.total_score:'—'}</strong><small>${fresh?'из 100':'не оценена'}</small></div><div class="task-info"><h3>${e(r.task.title||'Задача без названия')}</h3><p>${e((r.task.context||r.task.description||'Описание ещё не добавлено').slice(0,135))}${(r.task.context||r.task.description||'').length>135?'…':''}</p><div class="row"><span class="pill ${r.published?'':'gray'}">${r.published?'Опубликована':'Черновик'}</span>${r.task.topic?`<span class="pill outline">${e(r.task.topic)}</span>`:''}${r.rating&&!fresh?'<span class="pill orange">Нужна проверка</span>':''}<small class="muted">${new Date(r.updated_at).toLocaleDateString('ru-RU')}</small></div></div><div class="task-actions">${btn('open-task','Редактировать','secondary small','edit',`data-id="${e(r.id)}"`)}${btn('export-task','JSON','ghost small','download',`data-id="${e(r.id)}"`)}</div></article>`;
   }
   function catalogCard(r){const t=r.published.task,score=r.published.rating;return `<article class="card catalog-card"><div class="row between"><span class="pill outline">${e(t.topic||'Без темы')}</span><span class="pill ${score.total_score<40?'orange':''}">${e(score.level.label)}</span></div><h3>${e(t.title)}</h3><p>${e(t.need||t.context||t.description||'Описание требует уточнения.')}</p><div class="bottom"><span class="rank">${i('chart','sm')}${score.total_score} <span class="muted" style="font-weight:400;font-size:10px">/ 100</span></span><button class="text-link" data-action="view-public" data-id="${e(r.id)}">Посмотреть задачу ${i('arrow','sm')}</button></div></article>`;}
   function preview(task,score,title='Предпросмотр карточки'){
@@ -244,8 +255,8 @@
   function help(){
     openModal(DEMO?'О демоверсии':'Как работает конструктор',
       `<p>Это редактор задачи для представителя бизнеса: описание → уточнение → карточка → подтверждение → публикация.</p>
-      <div class="help-callout">${DEMO?'<strong>ИИ и ваш backend не подключены.</strong> Вопросы берутся из фиксированного шаблона. Карточка переносит только введённый текст. Деморейтинг проверяет наличие сведений, а не их смысл.':`<strong>${e(serviceLabel())}.</strong> ${service.lastAi?.mode==='openai'?'ИИ помогает уточнить описание и подготовить карточку из предоставленных сведений.':service.lastAi?'Сейчас вопросы подготавливаются по локальным правилам; ваши ответы сохраняются.':'После уточнения задачи здесь будет показан режим подготовки вопросов.'} Проверьте текст и подтвердите заполненные поля перед публикацией.`}</div>
-      <h3>Как устроен рейтинг готовности</h3><p>Контекст и потребность — 20; данные — 20; ожидаемый результат — 15; критерии успеха — 15; ограничения — 10; пользователи — 10; связь с бизнесом — 10. Начисление — только после подтверждения.</p>
+      <div class="help-callout">${DEMO?'<strong>ИИ и сервер не подключены.</strong> Вопросы берутся из фиксированного шаблона. Карточка переносит только введённый текст. Оценка использует простые локальные правила. Полная проверка доступна при запуске приложения через сервер.':`<strong>${e(serviceLabel())}.</strong> ${service.lastAi?.mode==='openai'?'ИИ помогает уточнить описание и подготовить карточку из предоставленных сведений.':service.lastAi?'Сейчас вопросы подготавливаются по локальным правилам; ваши ответы сохраняются.':'После уточнения задачи здесь будет показан режим подготовки вопросов.'} При подтверждении проверяется содержание актуальных полей. При недоступности ИИ применяются локальные правила с явной отметкой в оценке.`}</div>
+      <h3>Как устроен рейтинг готовности</h3><p>Контекст и потребность — 20; данные — 20; ожидаемый результат — 15; критерии успеха — 15; ограничения — 10; пользователи — 10; связь с бизнесом — 10. Баллы начисляются за содержательные подтверждённые сведения. Изменения требуют повторной проверки; галочка сама по себе не гарантирует баллы.</p>
       <p>0–39 — требует уточнения; 40–69 — рабочая; 70–89 — готовая; 90–100 — приоритетная. Низкий рейтинг не запрещает публикацию.</p>
       <h3>Где находятся данные</h3><p>${DEMO?'Данные сохраняются в этом браузере. Другой браузер, адрес или устройство получит отдельное хранилище.':'Кнопка «Сохранить черновик» отправляет задачу на сервер. Незавершённая форма дополнительно сохраняется на этом устройстве. Список задач общий для рабочего пространства.'} Экспорт JSON сохраняет копию текущих сведений в файл.</p>
       ${DEMO?'':`<h3>Изменение опубликованной задачи</h3><p>После сохранения правок задача становится черновиком и исчезает из каталога. Подтвердите сведения и опубликуйте её заново. В каталоге доступны все опубликованные задачи. В режиме «Команда» можно отправить отклик и посмотреть его статус; в режиме «Бизнес» — принять или отклонить предложения. Можно принять несколько команд.</p>`}
@@ -257,7 +268,15 @@
         }
       }});
   }
-  async function refresh(){state.records=await service.listTasks();state.catalog=await service.listPublished();}
+  async function refresh(){
+    state.records=await service.listTasks();state.catalog=await service.listPublished();
+    // Refresh cached ratings after an upgrade or a change in another tab, while
+    // retaining every unsaved field and interview answer in the current editor.
+    if(state.id&&!hasUnsavedDraft()){
+      const saved=state.records.find(record=>record.id===state.id);
+      if(saved)takeRecord(saved);
+    }
+  }
   async function navigate(page){
     if(collaboration?.isBusy()){toast('Дождитесь завершения текущего действия.');return;}
     if(!pages.includes(page))return;
@@ -321,7 +340,7 @@
       case 'confirm':
         if(!state.ack){toast('Сначала отметьте, что вы проверили сведения.');return;}
         if(!DEMO&&!validateDescription())break;
-        await run('Подтверждаем сведения и получаем оценку…',async()=>{const record=await service.confirmAndEvaluate(payload());if(!record.rating)throw new Error('Сервис не вернул рейтинг подтверждённой карточки.');takeRecord(record);if(!current())throw new Error('Не удалось подтвердить актуальную карточку. Проверьте заполненные поля и повторите подтверждение.');state.ack=false;toast('Сведения подтверждены. Готовность: '+record.rating.total_score+' из 100.');});break;
+        await run('Проверяем содержание карточки и рассчитываем баллы…',async()=>{const record=await service.confirmAndEvaluate(payload());if(!record.rating)throw new Error('Сервис не вернул рейтинг подтверждённой карточки.');takeRecord(record);if(!current())throw new Error('Не удалось подтвердить актуальную карточку. Проверьте заполненные поля и повторите подтверждение.');state.ack=false;toast('Проверка завершена. Готовность: '+record.rating.total_score+' из 100.'+(record.rating.invalid_fields?.length?' Уточните поля с замечаниями.':''));});break;
       case 'publish':
         if(!current()){toast('Подтвердите текущую версию карточки.');return;}
         if(!M.meaningful(state.task.title)){state.error='Добавьте название задачи и заново подтвердите карточку.';render();document.getElementById('card-title')?.focus();return;}
@@ -378,8 +397,16 @@
       const confirm=document.getElementById('confirm-button');if(confirm)confirm.disabled=true;
       const publish=document.getElementById('publish-button');if(publish){publish.disabled=!current()||alreadyPublished();publish.innerHTML=i('send')+(alreadyPublished()&&current()?'Опубликовано':'Опубликовать');}
       const stale=document.getElementById('stale-note');if(stale)stale.hidden=!(state.rating&&!current());
-      document.querySelector('.score-ring')?.classList.toggle('stale',!!state.rating&&!current());
-      const level=document.getElementById('score-level');if(level&&state.rating){level.textContent=current()?state.rating.level.label:(DEMO?'Предыдущая оценка':'Требует подтверждения');level.classList.toggle('gray',!current());}
+      const aside=document.getElementById('rating-aside');if(aside)aside.outerHTML=ratingAside();
+      document.querySelectorAll('[data-quality-for]').forEach(node=>{
+        const key=node.dataset.qualityFor,result=current()?state.rating.quality?.fields[key]:null;
+        node.innerHTML=qualityFeedback(key);
+        const input=document.getElementById('card-'+key);
+        if(input){
+          if(result)input.setAttribute('aria-describedby','quality-'+key);else input.removeAttribute('aria-describedby');
+          if(result&&['invalid','needs_detail'].includes(result.status))input.setAttribute('aria-invalid','true');else input.removeAttribute('aria-invalid');
+        }
+      });
       scheduleSave();
     }else if(target.dataset.answer){
       state.answers[target.dataset.answer]=target.value;

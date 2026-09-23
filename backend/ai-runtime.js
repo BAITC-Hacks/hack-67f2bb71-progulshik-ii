@@ -72,6 +72,12 @@ export function createAiRuntime({
       if (service === capturedService) verified = result.mode === 'openai';
       return result;
     },
+    async reviewCard(card) {
+      const capturedService = service;
+      const result = await capturedService.reviewCard(card);
+      if (service === capturedService) verified = result.mode === 'openai';
+      return result;
+    },
     async connect(settings = {}) {
       assertIdle();
       if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
