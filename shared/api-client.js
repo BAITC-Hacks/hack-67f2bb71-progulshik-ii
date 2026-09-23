@@ -43,6 +43,10 @@ export function createApiClient({ baseUrl = 'http://127.0.0.1:3001', fetchImpl =
     listTeams: () => request('/api/teams'),
     createTeam: (input) => request('/api/teams', 'POST', input),
     listProposals: (taskId) => request(`/api/tasks/${key(taskId)}/proposals`),
+    listAllProposals: (filters = {}) => {
+      const search = new URLSearchParams(Object.entries(filters).filter(([name, value]) => ['taskId', 'teamId'].includes(name) && value));
+      return request(`/api/proposals${search.size ? `?${search}` : ''}`);
+    },
     createProposal: (taskId, input) => request(`/api/tasks/${key(taskId)}/proposals`, 'POST', input),
     decideProposal: (id, status) => request(`/api/proposals/${key(id)}`, 'PATCH', { status }),
   };

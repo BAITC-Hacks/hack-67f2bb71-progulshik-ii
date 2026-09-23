@@ -1,5 +1,5 @@
 /* HTTP-адаптер реального API. Рейтинг, подтверждение и публикация принадлежат
- * серверу. Вопросы и ответы хранятся в памяти для текущего сеанса редактора.
+ * серверу. Вопросы и ответы сохраняются вместе с задачей в interview.
  */
 (function(S){
   'use strict';
@@ -59,9 +59,12 @@
       const task=fromCard(value.card,value.rawDescription,value.topic);
       const confirmed=value.confirmedFields.length>0;
       const rating=confirmed?this.rating(value.rating):null;
-      const metadata=this.metadata.get(value.id)||{questions:[],answers:{}};
+      const metadata=value.interview?{
+        questions:value.interview.questions.map(question=>({...question,field:uiField[question.field]})),
+        answers:value.interview.answers,source:value.interview.source
+      }:this.metadata.get(value.id)||{questions:[],answers:{}};
       return M.validateRecord({id:value.id,revision:value.revision,task,rating,
-        questions:M.clone(metadata.questions),answers:M.clone(metadata.answers),
+        questions:M.clone(metadata.questions),answers:M.clone(metadata.answers),questions_source:metadata.source??value.rawDescription,
         confirmed_fingerprint:confirmed&&value.rating.unconfirmedFields.length===0?M.fingerprint(task):null,
         published:value.status==='published'?{task:M.clone(task),rating:this.rating(value.rating),published_at:value.publishedAt}:null,
         created_at:value.createdAt,updated_at:value.updatedAt});
@@ -101,6 +104,12 @@
 
     async save(payload){
       const task=M.normalizeTask(payload.task),body={rawDescription:task.description,card:toCard(task)};
+      if(payload.questions!==undefined||payload.answers!==undefined){
+        const questions=payload.questions||[];
+        body.interview={source:payload.questionsSource??task.description,
+          questions:questions.map(question=>({...question,field:fieldMap[question.field]})),
+          answers:Object.fromEntries(questions.filter(question=>typeof payload.answers?.[question.id]==='string').map(question=>[question.id,payload.answers[question.id]]))};
+      }
       // Пустая тема при создании получает стандартное значение самого API.
       if(task.topic.trim())body.topic=task.topic;
       if(payload.id)body.revision=payload.revision;
@@ -138,6 +147,21 @@
     }
     async listTasks(){return this.list('/api/tasks?status=all');}
     async listPublished(){return this.list('/api/tasks?status=published');}
+    async collection(path){
+      const data=await this.request('GET',path);
+      if(!Array.isArray(data?.items))throw apiError('Сервер вернул некорректный список.','INVALID_RESPONSE');
+      return data.items;
+    }
+    async listTeams(){return this.collection('/api/teams');}
+    async createTeam(payload){return this.request('POST','/api/teams',payload);}
+    async listProposals(filters={}){
+      const query=new URLSearchParams(Object.entries(filters).filter(([key,value])=>['taskId','teamId'].includes(key)&&value));
+      return this.collection('/api/proposals'+(query.size?'?'+query:''));
+    }
+    async createProposal({taskId,...payload}){
+      return this.request('POST','/api/tasks/'+encodeURIComponent(taskId)+'/proposals',payload);
+    }
+    async decideProposal({id,status}){return this.request('PATCH','/api/proposals/'+encodeURIComponent(id),{status});}
   }
   S.HttpService=HttpService;
 })(window.Sana);

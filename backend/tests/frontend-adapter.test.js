@@ -96,8 +96,8 @@ test('frontend HTTP adapter completes questions, card, save, confirm, publish an
   assert.ok(requests.some((request) => request.path === '/api/tasks?status=published'));
   assert.equal(requests.find((request) => request.path.endsWith('/publish')).body.revision, 2);
   const freshSession = await new Sana.HttpService().getTask({ id: record.id });
-  assert.deepEqual(plain(freshSession.questions), []);
-  assert.deepEqual(plain(freshSession.answers), {});
+  assert.deepEqual(plain(freshSession.questions), plain(questions));
+  assert.deepEqual(plain(freshSession.answers), answers);
 });
 
 test('low score and unknown placeholders are confirmed using backend fields and may be published', async (t) => {

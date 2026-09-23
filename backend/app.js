@@ -62,7 +62,7 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     const input = createTaskSchema.parse(req.body);
     const now = new Date().toISOString();
     const task = { id: randomUUID(), rawDescription: input.rawDescription, topic: input.topic,
-      card: { ...emptyCard(), ...input.card }, confirmedFields: [], status: 'draft', revision: 1,
+      card: { ...emptyCard(), ...input.card }, interview: input.interview ?? { source: '', questions: [], answers: {} }, confirmedFields: [], status: 'draft', revision: 1,
       createdAt: now, updatedAt: now, publishedAt: null };
     store.put('tasks', task);
     res.status(201).json(viewTask(task));
@@ -77,11 +77,14 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     const changedFields = CARD_FIELDS.filter((field) => card[field] !== task.card[field]);
     const rawChanged = input.rawDescription !== undefined && input.rawDescription !== task.rawDescription;
     const changed = changedFields.length > 0 || rawChanged || (input.topic !== undefined && input.topic !== task.topic);
-    if (!changed) return res.json(viewTask(task));
+    const interview = input.interview ?? (rawChanged ? { source: '', questions: [], answers: {} } : task.interview);
+    const interviewChanged = JSON.stringify(interview) !== JSON.stringify(task.interview);
+    if (!changed && !interviewChanged) return res.json(viewTask(task));
     res.json(saveTask({ ...task, card, topic: input.topic ?? task.topic,
       rawDescription: input.rawDescription ?? task.rawDescription,
+      interview,
       confirmedFields: rawChanged ? [] : task.confirmedFields.filter((field) => !changedFields.includes(field)),
-      status: 'draft', publishedAt: null }));
+      status: changed ? 'draft' : task.status, publishedAt: changed ? null : task.publishedAt }));
   });
 
   app.post('/api/tasks/:id/confirm', (req, res) => {
@@ -112,6 +115,15 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     res.status(201).json(team);
   });
 
+  app.get('/api/proposals', (req, res) => {
+    const { taskId, teamId } = req.query;
+    if (![taskId, teamId].every((value) => value === undefined || (typeof value === 'string' && value.length <= 100))) {
+      throw new ApiError(400, 'INVALID_FILTER', 'Некорректный фильтр откликов');
+    }
+    res.json({ items: store.list('proposals')
+      .filter((proposal) => (!taskId || proposal.taskId === taskId) && (!teamId || proposal.teamId === teamId))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)) });
+  });
   app.get('/api/tasks/:id/proposals', (req, res) => {
     find('tasks', req.params.id);
     res.json({ items: store.list('proposals').filter((proposal) => proposal.taskId === req.params.id)

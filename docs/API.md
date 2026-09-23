@@ -4,7 +4,7 @@
 
 Общие типы находятся в `shared/types.ts`, готовый клиент — в `shared/api-client.js`. Идентификаторы приходят от сервера: не задавайте их в интерфейсе вручную. Демо работает без регистрации и проверки прав; переключатель «Бизнес / Команда» меняет экран интерфейса.
 
-## Готовый клиент для React
+## Готовый JavaScript-клиент
 
 ```js
 import { createApiClient, ApiRequestError } from './api-client.js';
@@ -29,6 +29,7 @@ const { items } = await api.listTasks({ status: 'published' });
 | `api.listTeams()` | Команды `{ items }` |
 | `api.createTeam(input)` | Новая команда |
 | `api.listProposals(taskId)` | Отклики `{ items }` |
+| `api.listAllProposals({ taskId?, teamId? })` | Общий список или отклики выбранной задачи/команды `{ items }` |
 | `api.createProposal(taskId, input)` | Новый отклик |
 | `api.decideProposal(id, status)` | Ручное решение: строка `'accepted'` или `'rejected'` |
 
@@ -112,14 +113,16 @@ const { items } = await api.listTasks({ status: 'published' });
 
 | Метод | Адрес | Тело / параметры | Ответ |
 | --- | --- | --- | --- |
-| `POST` | `/api/tasks` | `{ rawDescription, topic?, card? }` | `BusinessTask` |
+| `POST` | `/api/tasks` | `{ rawDescription, topic?, card?, interview? }` | `BusinessTask` |
 | `GET` | `/api/tasks` | Параметры описаны ниже | `{ items: BusinessTask[] }` |
 | `GET` | `/api/tasks/:id` | — | `BusinessTask` |
-| `PATCH` | `/api/tasks/:id` | `{ revision, card?, topic?, rawDescription? }` | `BusinessTask` |
+| `PATCH` | `/api/tasks/:id` | `{ revision, card?, topic?, rawDescription?, interview? }` | `BusinessTask` |
 | `POST` | `/api/tasks/:id/confirm` | `{ revision, fields: CardField[] }` | `BusinessTask` |
 | `POST` | `/api/tasks/:id/publish` | `{ revision }` | `BusinessTask` |
 
-`rawDescription`: 10–12000 символов. `topic`: 1–100 символов, при создании по умолчанию `Другое`. Создание задачи сохраняет черновик. В `PATCH` передайте хотя бы одно из `card`, `topic`, `rawDescription` вместе с актуальной ревизией.
+`rawDescription`: 10–12000 символов. `topic`: 1–100 символов, при создании по умолчанию `Другое`. Создание задачи сохраняет черновик. В `PATCH` передайте хотя бы одно из `card`, `topic`, `rawDescription`, `interview` вместе с актуальной ревизией.
+
+`interview` сохраняет уточнение до формирования карточки: `{ source, questions, answers }`. `source` — описание, по которому построены вопросы (до 12000 символов). `questions` содержит 0 либо 3–20 объектов `{ id, field, text, hint }`: уникальный `id` до 100 символов, `field` из `CardField`, `text` и `hint` до 800 символов. `answers` — объект `{ questionId: "ответ" }`, каждый ответ до 6000 символов и только для сохранённого вопроса. Интервью возвращается в `BusinessTask`; старые записи могут не иметь его. Изменение только интервью увеличивает ревизию, но не снимает публикацию и не меняет баллы: для этого нужно перенести ответы в карточку и подтвердить её. При изменении исходного описания без нового `interview` старое интервью очищается.
 
 Параметры каталога:
 
@@ -190,6 +193,7 @@ const { items } = await api.listTasks({ status: 'published' });
 | Метод | Адрес | Тело | Ответ |
 | --- | --- | --- | --- |
 | `GET` | `/api/tasks/:id/proposals` | — | `{ items: Proposal[] }` |
+| `GET` | `/api/proposals` | Необязательные `taskId`, `teamId` | `{ items: Proposal[] }` |
 | `POST` | `/api/tasks/:id/proposals` | `{ teamId, idea, plan, timeline, prototypeUrl }` | `Proposal` |
 | `PATCH` | `/api/proposals/:id` | `{ status: 'accepted' | 'rejected' }` | `Proposal` |
 

@@ -10,17 +10,30 @@ export const emptyCard = () => Object.fromEntries(CARD_FIELDS.map((field) => [fi
 const fieldText = z.string().trim().max(6000);
 export const cardSchema = z.object(Object.fromEntries(CARD_FIELDS.map((field) => [field, fieldText]))).strict();
 export const partialCardSchema = cardSchema.partial();
+export const interviewSchema = z.object({
+  source: z.string().max(12000).default(''),
+  questions: z.array(z.object({
+    id: z.string().min(1).max(100), field: z.enum(CARD_FIELDS),
+    text: z.string().min(1).max(800), hint: z.string().max(800).default(''),
+  }).strict()).max(20)
+    .refine((questions) => questions.length === 0 || questions.length >= 3, 'Сохраните минимум три вопроса')
+    .refine((questions) => new Set(questions.map((question) => question.id)).size === questions.length, 'Идентификаторы вопросов должны различаться'),
+  answers: z.record(z.string().min(1).max(100), z.string().max(6000))
+    .refine((answers) => Object.keys(answers).length <= 20, 'Слишком много ответов'),
+}).strict().refine((interview) => Object.keys(interview.answers).every((id) => interview.questions.some((question) => question.id === id)), 'Ответ должен относиться к сохранённому вопросу');
 export const createTaskSchema = z.object({
   rawDescription: z.string().trim().min(10).max(12000),
   topic: z.string().trim().min(1).max(100).default('Другое'),
   card: partialCardSchema.default({}),
+  interview: interviewSchema.optional(),
 }).strict();
 export const updateTaskSchema = z.object({
   revision: z.number().int().positive(),
   rawDescription: z.string().trim().min(10).max(12000).optional(),
   topic: z.string().trim().min(1).max(100).optional(),
   card: partialCardSchema.optional(),
-}).strict().refine((data) => data.card !== undefined || data.topic !== undefined || data.rawDescription !== undefined, 'Передайте изменённые поля');
+  interview: interviewSchema.optional(),
+}).strict().refine((data) => data.card !== undefined || data.topic !== undefined || data.rawDescription !== undefined || data.interview !== undefined, 'Передайте изменённые поля');
 export const confirmationSchema = z.object({
   revision: z.number().int().positive(),
   fields: z.array(z.enum(CARD_FIELDS)).min(1).max(CARD_FIELDS.length),

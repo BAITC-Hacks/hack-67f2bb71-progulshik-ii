@@ -16,6 +16,7 @@ export interface BusinessTask {
   confirmedFields: CardField[]; status: TaskStatus; revision: number;
   createdAt: string; updatedAt: string; publishedAt: string | null;
   rating: Rating;
+  interview?: { source: string; questions: Array<{ id: string; field: CardField; text: string; hint: string }>; answers: Record<string, string> };
 }
 export interface Team {
   id: string; name: string; interests: string[]; skills: string[]; technologies: string[];

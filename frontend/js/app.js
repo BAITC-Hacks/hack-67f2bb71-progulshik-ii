@@ -7,6 +7,10 @@
   const DEMO=S.config.mode==='demo';
   const WORKSPACE=DEMO?'aisana.workspace.v1':'aisana.workspace.http.v1';
   const service=S.service=DEMO?new S.DemoService():new S.HttpService();
+  const collaborationPages=['catalog','team-proposals','business-proposals','teams'];
+  const pages=['editor','tasks',...collaborationPages];
+  let collaboration=null,role='business';
+  try{if(S.storage.read('aisana.role.v1','business')==='team')role='team';}catch(_){/* A role preference can safely use its default. */}
   const icons={
     arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',back:'<path d="M19 12H5m5 5-5-5 5-5"/>',
     plus:'<path d="M12 5v14M5 12h14"/>',check:'<path d="m5 12 4 4L19 6"/>',
@@ -54,7 +58,9 @@
       if(state.step===2&&!state.questions.length)state.step=1;
     }
   }catch(error){state=initial();startupError=error.message;workspaceCorrupt=true;}
-  const hashPage=location.hash.slice(1);if(['tasks','catalog'].includes(hashPage))state.page=hashPage;
+  const hashPage=location.hash.slice(1);if(pages.includes(hashPage))state.page=hashPage;
+  if(!DEMO&&role==='team'&&['editor','tasks','business-proposals'].includes(state.page))state.page='catalog';
+  if(!DEMO&&role==='business'&&state.page==='team-proposals')state.page='business-proposals';
   state.error=startupError;
   function persist(){
     clearTimeout(saveTimer);
@@ -66,7 +72,13 @@
   }
   function scheduleSave(){state.autosave='Сохраняем локально…';document.querySelectorAll('[data-save-note]').forEach(n=>n.textContent=state.autosave);clearTimeout(saveTimer);saveTimer=setTimeout(persist,180);}
   function toast(text){clearTimeout(toastTimer);const el=document.getElementById('toast');el.textContent=text;el.hidden=false;toastTimer=setTimeout(()=>el.hidden=true,4500);}
-  function payload(){return {id:state.id,revision:state.revision,task:M.clone(state.task),questions:M.clone(state.questions),answers:M.clone(state.answers)};}
+  function payload(){return {id:state.id,revision:state.revision,task:M.clone(state.task),questions:M.clone(state.questions),answers:M.clone(state.answers),questionsSource:state.questionsSource};}
+  function hasUnsavedDraft(){
+    if(!state.record)return Object.values(state.task).some(v=>v.trim())||Object.values(state.answers).some(v=>v.trim());
+    return M.fingerprint(state.record.task)!==M.fingerprint(state.task)||
+      JSON.stringify(state.questions)!==JSON.stringify(state.record.questions||[])||
+      JSON.stringify(state.answers)!==JSON.stringify(state.record.answers||{});
+  }
   function current(){return !!state.rating&&state.confirmedFingerprint===M.fingerprint(state.task);}
   function alreadyPublished(){return !!state.record?.published&&M.fingerprint(state.record.published.task)===M.fingerprint(state.task);}
   function recordFresh(r){return !!r.rating&&r.confirmed_fingerprint===M.fingerprint(r.task);}
@@ -118,31 +130,33 @@
   function openRecord(r){
     takeRecord(r);state.page='editor';
     state.cardReady=!!r.rating||M.fields.some(f=>!['title','topic'].includes(f.key)&&M.meaningful(r.task[f.key]));
-    state.step=state.cardReady?3:state.questions.length?2:1;state.questionsSource=r.task.description;
+    state.step=state.cardReady?3:state.questions.length?2:1;state.questionsSource=r.questions_source??r.task.description;
     state.ack=false;state.exampleId=null;state.success=false;state.conflict=false;history.replaceState(null,'','#editor');
   }
   function filterTopics(){return [...new Set([...M.topics,...state.records.map(r=>r.task.topic),...state.catalog.map(r=>r.published?.task.topic)].filter(Boolean))];}
   function shell(){
-    const title=state.page==='editor'?'Конструктор задач':state.page==='tasks'?(DEMO?'Мои задачи':'Задачи пространства'):'Каталог задач';
+    const title=({editor:'Конструктор задач',tasks:DEMO?'Мои задачи':'Задачи пространства',catalog:'Каталог задач','team-proposals':'Мои отклики','business-proposals':'Отклики команд',teams:'Команды'})[state.page];
     const inert=state.busy?'inert':'';
     return `${state.busy?`<div class="busy-strip" role="status" aria-live="polite"><span class="spinner"></span>${e(state.busyText)}</div>`:''}
     <aside class="sidebar" ${inert}>
       <a class="brand" href="#editor" aria-label="AI Sana — конструктор"><span class="brand-mark"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="m7 25 9-19h3l9 19h-6l-5-11-5 11Z" fill="currentColor"/><path d="M3 25h9" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></svg></span><span class="brand-name">AI <span>Sana</span><span style="color:#a6c78b">.</span></span></a>
       <div class="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <nav class="nav" aria-label="Основная навигация">
-        <a class="nav-link ${state.page==='editor'?'active':''}" href="#editor" ${state.page==='editor'?'aria-current="page"':''}>${i('edit')}Конструктор</a>
-        <a class="nav-link ${state.page==='tasks'?'active':''}" href="#tasks" ${state.page==='tasks'?'aria-current="page"':''}>${i('folder')}${DEMO?'Мои задачи':'Задачи пространства'} <span class="nav-count">${state.records.length}</span></a>
-        <a class="nav-link ${state.page==='catalog'?'active':''}" href="#catalog" ${state.page==='catalog'?'aria-current="page"':''}>${i('grid')}Каталог <span class="nav-tag">${DEMO?'Демо':'Просмотр'}</span></a>
+        ${DEMO||role==='business'?`<a class="nav-link ${state.page==='editor'?'active':''}" href="#editor" ${state.page==='editor'?'aria-current="page"':''}>${i('edit')}Конструктор</a>
+        <a class="nav-link ${state.page==='tasks'?'active':''}" href="#tasks" ${state.page==='tasks'?'aria-current="page"':''}>${i('folder')}${DEMO?'Мои задачи':'Задачи пространства'} <span class="nav-count">${state.records.length}</span></a>`:''}
+        <a class="nav-link ${state.page==='catalog'?'active':''}" href="#catalog" ${state.page==='catalog'?'aria-current="page"':''}>${i('grid')}Каталог</a>
+        ${!DEMO?`<a class="nav-link ${state.page.includes('proposals')?'active':''}" href="#${role==='team'?'team':'business'}-proposals" ${state.page.includes('proposals')?'aria-current="page"':''}>${i('send')}${role==='team'?'Мои отклики':'Отклики команд'}</a>
+        <a class="nav-link ${state.page==='teams'?'active':''}" href="#teams" ${state.page==='teams'?'aria-current="page"':''}>${i('business')}Команды</a>`:''}
       </nav>
       <div class="sidebar-note"><div class="note-icon">${i('spark')}</div><h3>Сначала ясность.<br>Потом решение.</h3><p>Хорошее описание помогает студентам понять вашу задачу и предложить подходящую идею.</p><button class="text-link" data-action="help">Как это работает ${i('arrow','sm')}</button></div>
       <div class="sidebar-bottom"><span class="dot"></span>${DEMO?'ЛОКАЛЬНАЯ ВЕРСИЯ':'СЕРВИС ПОДКЛЮЧЁН'} <span style="margin-left:auto">01</span></div>
     </aside>
-    <div class="main-shell"><header class="topbar" ${inert}><div class="breadcrumb">Рабочее пространство <span>/</span> <strong>${title}</strong></div><div class="topbar-right"><button class="pill ${DEMO||['mock','fallback'].includes(service.lastAi?.mode)?'orange':'outline'}" style="border:0;cursor:pointer" data-action="help"><span class="dot"></span>${e(serviceLabel())}</button><span class="mode-label">${i('business','sm')}Бизнес</span><span class="avatar" aria-label="Режим бизнеса">Б</span></div></header>
+    <div class="main-shell"><header class="topbar" ${inert}><div class="breadcrumb">Рабочее пространство <span>/</span> <strong>${title}</strong></div><div class="topbar-right"><button class="pill ${DEMO||['mock','fallback'].includes(service.lastAi?.mode)?'orange':'outline'}" style="border:0;cursor:pointer" data-action="help"><span class="dot"></span>${e(serviceLabel())}</button>${DEMO?'<span class="mode-label">Бизнес</span>':`<label class="role-picker"><span>Режим демонстрации</span><select id="role-select" aria-label="Режим демонстрации"><option value="business" ${role==='business'?'selected':''}>Бизнес</option><option value="team" ${role==='team'?'selected':''}>Команда</option></select></label>`}</div></header>
     <main class="page" id="main" ${inert} aria-busy="${state.busy}">
       ${state.error?`<div class="error-banner" role="alert">${i('info')}<div><span>${e(state.error)}</span>${state.conflict?`<div class="row wrap recovery-actions">${btn('export-current','Скачать текущий JSON','secondary small','download')}${btn('reload-current','Загрузить сохранённую версию','secondary small','folder')}</div>`:''}${workspaceCorrupt&&!DEMO?`<div class="row wrap recovery-actions">${btn('reset-workspace','Сбросить локальный сеанс','secondary small')}</div>`:''}</div><button class="text-link" data-action="dismiss-error" aria-label="Закрыть ошибку">${i('close','sm')}</button></div>`:''}
       ${!S.storage.available?`<div class="error-banner" role="status">${i('info')}${DEMO?'Хранилище недоступно: данные живут только в этой вкладке. Экспортируйте JSON до закрытия.':'Автосохранение формы на устройстве недоступно. Сохраните черновик на сервере или скачайте JSON перед закрытием вкладки.'}</div>`:''}
       ${aiNotice()}
-      ${state.page==='editor'?editor():state.page==='tasks'?tasksPage():catalogPage()}
+      ${!DEMO&&collaborationPages.includes(state.page)?collaboration.render(state.page):state.page==='editor'?editor():state.page==='tasks'?tasksPage():catalogPage()}
       <footer class="footer-note"><span>AI Sana · Бизнес и студенческие команды</span><span>ОТ ИДЕИ К РЕЗУЛЬТАТУ</span></footer>
     </main></div>`;
   }
@@ -225,7 +239,7 @@
   }
   function catalogCard(r){const t=r.published.task,score=r.published.rating;return `<article class="card catalog-card"><div class="row between"><span class="pill outline">${e(t.topic||'Без темы')}</span><span class="pill ${score.total_score<40?'orange':''}">${e(score.level.label)}</span></div><h3>${e(t.title)}</h3><p>${e(t.need||t.context||t.description||'Описание требует уточнения.')}</p><div class="bottom"><span class="rank">${i('chart','sm')}${score.total_score} <span class="muted" style="font-weight:400;font-size:10px">/ 100</span></span><button class="text-link" data-action="view-public" data-id="${e(r.id)}">Посмотреть задачу ${i('arrow','sm')}</button></div></article>`;}
   function preview(task,score,title='Предпросмотр карточки'){
-    openModal(title,`<div class="row wrap" style="margin-bottom:15px"><span class="pill outline">${e(task.topic||'Без темы')}</span>${score?`<span class="pill">${score.total_score} / 100 · ${e(score.level.label)}</span>`:'<span class="pill gray">Ещё не подтверждена</span>'}</div><h2 style="font-size:23px;margin-bottom:24px;overflow-wrap:anywhere">${e(task.title||'Задача без названия')}</h2>${M.fields.filter(f=>!['title','topic'].includes(f.key)).map(f=>`<div class="detail-field"><h3>${e(f.label)}</h3><p>${e(task[f.key]||'Пока не указано')}</p></div>`).join('')}<div class="help-callout">${DEMO?'Локальная демонстрация. Отклики студентов и выбор команды здесь не реализованы.':'Это предпросмотр редактора. Отклики и выбор команды подключаются отдельным модулем.'}</div>`,`<button class="btn secondary" data-modal="close">Закрыть</button>`);
+    openModal(title,`<div class="row wrap" style="margin-bottom:15px"><span class="pill outline">${e(task.topic||'Без темы')}</span>${score?`<span class="pill">${score.total_score} / 100 · ${e(score.level.label)}</span>`:'<span class="pill gray">Ещё не подтверждена</span>'}</div><h2 style="font-size:23px;margin-bottom:24px;overflow-wrap:anywhere">${e(task.title||'Задача без названия')}</h2>${M.fields.filter(f=>!['title','topic'].includes(f.key)).map(f=>`<div class="detail-field"><h3>${e(f.label)}</h3><p>${e(task[f.key]||'Пока не указано')}</p></div>`).join('')}<div class="help-callout">${DEMO?'Локальная демонстрация. Отклики студентов и выбор команды здесь не реализованы.':'В каталоге команда может отправить предложение. В разделе «Отклики команд» бизнес принимает решение.'}</div>`,`<button class="btn secondary" data-modal="close">Закрыть</button>`);
   }
   function help(){
     openModal(DEMO?'О демоверсии':'Как работает конструктор',
@@ -234,7 +248,7 @@
       <h3>Как устроен рейтинг готовности</h3><p>Контекст и потребность — 20; данные — 20; ожидаемый результат — 15; критерии успеха — 15; ограничения — 10; пользователи — 10; связь с бизнесом — 10. Начисление — только после подтверждения.</p>
       <p>0–39 — требует уточнения; 40–69 — рабочая; 70–89 — готовая; 90–100 — приоритетная. Низкий рейтинг не запрещает публикацию.</p>
       <h3>Где находятся данные</h3><p>${DEMO?'Данные сохраняются в этом браузере. Другой браузер, адрес или устройство получит отдельное хранилище.':'Кнопка «Сохранить черновик» отправляет задачу на сервер. Незавершённая форма дополнительно сохраняется на этом устройстве. Список задач общий для рабочего пространства.'} Экспорт JSON сохраняет копию текущих сведений в файл.</p>
-      ${DEMO?'':`<h3>Изменение опубликованной задачи</h3><p>После сохранения правок задача становится черновиком и исчезает из каталога. Подтвердите сведения и опубликуйте её заново. Предпросмотр каталога показывает сохранённые публикации; отклики команд подключаются отдельным модулем.</p>`}
+      ${DEMO?'':`<h3>Изменение опубликованной задачи</h3><p>После сохранения правок задача становится черновиком и исчезает из каталога. Подтвердите сведения и опубликуйте её заново. В каталоге доступны все опубликованные задачи. В режиме «Команда» можно отправить отклик и посмотреть его статус; в режиме «Бизнес» — принять или отклонить предложения. Можно принять несколько команд.</p>`}
       <p style="margin-top:14px">Сохранить черновик: <span class="keyboard">Ctrl + S</span>. В диалоге можно нажать <span class="keyboard">Esc</span>.</p>`,
       `${DEMO?'<button class="btn secondary small" data-modal="fail">Проверить ошибку запроса</button><button class="btn danger small" data-modal="reset">Сбросить демоданные</button>':workspaceCorrupt?'<button class="btn secondary small" data-modal="workspace">Сбросить локальный сеанс</button>':''}<button class="btn primary small" data-modal="close">Понятно</button>`,
       {workspace:()=>{dialog.close();action('reset-workspace');},fail:()=>{service.failNext=true;dialog.close();toast('Следующая операция сервиса завершится тестовой ошибкой.');},reset:async()=>{
@@ -245,20 +259,24 @@
   }
   async function refresh(){state.records=await service.listTasks();state.catalog=await service.listPublished();}
   async function navigate(page){
+    if(collaboration?.isBusy()){toast('Дождитесь завершения текущего действия.');return;}
+    if(!pages.includes(page))return;
+    if(!DEMO&&role==='team'&&['editor','tasks','business-proposals'].includes(page))page='catalog';
+    if(!DEMO&&role==='business'&&page==='team-proposals')page='business-proposals';
     if(state.busy)return;persist();state.page=page;state.error='';state.filter={search:'',topic:'',status:''};
     if(location.hash!==('#'+page))history.replaceState(null,'','#'+page);
     if(page==='editor'){render();window.scrollTo({top:0,behavior:'instant'});return;}
-    await run('Загружаем задачи…',refresh);window.scrollTo({top:0,behavior:'instant'});
+    await run('Открываем раздел…',async()=>{await refresh();if(!DEMO&&collaborationPages.includes(page))await collaboration.load(page);});window.scrollTo({top:0,behavior:'instant'});
   }
   async function newTask(){
-    const hasText=Object.values(state.task).some(v=>v.trim());
-    if(hasText&&(!state.record||M.fingerprint(state.record.task)!==M.fingerprint(state.task))){
+    if(hasUnsavedDraft()){
       if(!await ask('Начать новую задачу?','Текущий незавершённый сеанс будет заменён. Сохранённые задачи останутся в рабочем пространстве. Для сохранения этого сеанса сначала нажмите «Сохранить черновик».','Новая задача'))return;
     }
     const records=state.records,catalog=state.catalog;state={...initial(),records,catalog};persist();history.replaceState(null,'','#editor');render();window.scrollTo({top:0,behavior:'instant'});
   }
   async function action(name,element){
     if(state.busy)return;
+    if(!DEMO&&name.startsWith('collab-')){await collaboration.handleAction(name,element);return;}
     switch(name){
       case 'help':help();break;
       case 'dismiss-error':state.error='';render();break;
@@ -312,7 +330,7 @@
           window.dispatchEvent(new CustomEvent('sana:task-published',{detail:{id:record.id,record:M.clone(record)}}));
         });window.scrollTo({top:0,behavior:'instant'});break;
       case 'return-editor':state.success=false;move(3);break;
-      case 'goto-catalog':await navigate('catalog');break;
+      case 'goto-catalog':if(DEMO)await navigate('catalog');else await collaboration.handleAction('collab-back-catalog',element);break;
       case 'focus-field':{
         const el=document.getElementById('card-'+element.dataset.id);el?.scrollIntoView({block:'center',behavior:'smooth'});el?.focus({preventScroll:true});break;}
       case 'preview-working':preview(state.task,current()?state.rating:null);break;
@@ -321,7 +339,7 @@
       case 'export-task':{
         const record=state.records.find(r=>r.id===element.dataset.id);if(record)exportJSON(record,'ai-sana-'+record.id+'.json');break;}
       case 'open-task':
-        if(Object.values(state.task).some(v=>v.trim())&&(!state.record||M.fingerprint(state.record.task)!==M.fingerprint(state.task))&&!await ask('Открыть сохранённую задачу?','Текущие несохранённые изменения сеанса будут заменены. Сначала сохраните черновик или экспортируйте JSON, если они нужны.','Открыть'))return;
+        if(hasUnsavedDraft()&&!await ask('Открыть сохранённую задачу?','Текущие несохранённые изменения сеанса будут заменены. Сначала сохраните черновик или экспортируйте JSON, если они нужны.','Открыть'))return;
         await run('Открываем сохранённую задачу…',async()=>{
           openRecord(await service.getTask({id:element.dataset.id}));
         });window.scrollTo({top:0,behavior:'instant'});break;
@@ -336,10 +354,15 @@
   }
   app.addEventListener('click',event=>{
     const nav=event.target.closest('a[href^="#"]');
-    if(nav&&['#editor','#tasks','#catalog'].includes(nav.getAttribute('href'))){event.preventDefault();navigate(nav.getAttribute('href').slice(1));return;}
+    if(nav&&pages.includes(nav.getAttribute('href').slice(1))){
+      event.preventDefault();const page=nav.getAttribute('href').slice(1);
+      if(page==='catalog'&&!DEMO&&!state.busy)collaboration.handleAction('collab-back-catalog',nav).catch(error=>{state.error=error.message;render();});
+      else navigate(page);return;
+    }
     const button=event.target.closest('[data-action]');if(button&&!button.disabled)action(button.dataset.action,button).catch(error=>{state.error=error.message;render();});
   });
   function editedInput(event){
+    if(!DEMO)collaboration.handleInput(event);
     const target=event.target;
     if(target.dataset.task){
       state.task[target.dataset.task]=target.value;
@@ -366,9 +389,17 @@
   }
   app.addEventListener('input',editedInput);
   app.addEventListener('change',event=>{
+    if(!DEMO){
+      collaboration.handleChange(event);
+      if(event.target.id==='role-select'){
+        if(state.busy||collaboration.isBusy()){event.target.value=role;toast('Дождитесь завершения текущего действия.');return;}
+        role=event.target.value==='team'?'team':'business';S.storage.write('aisana.role.v1',role);
+        navigate(role==='team'?'catalog':'business-proposals');return;
+      }
+    }
     if(event.target.id==='confirm-checkbox'){state.ack=event.target.checked;const b=document.getElementById('confirm-button');if(b)b.disabled=!state.ack;}
   });
-  window.addEventListener('hashchange',()=>{const page=location.hash.slice(1);if(['editor','tasks','catalog'].includes(page))navigate(page);});
+  window.addEventListener('hashchange',()=>{const page=location.hash.slice(1);if(pages.includes(page))navigate(page);});
   window.addEventListener('pagehide',persist);
   window.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'&&!dialog.open){event.preventDefault();if(state.page==='editor')action('save');}});
   // Публичный интерфейс для общей оболочки. Не требует доступа к приватному state.
@@ -379,6 +410,9 @@
     navigate,
     exportCurrent:()=>action('export-current')
   };
+  if(!DEMO)collaboration=S.createCollaboration({service,e,i,btn,heading,openModal,toast,render,navigate,getRole:()=>role,openEditor:async id=>{
+    role='business';S.storage.write('aisana.role.v1',role);await action('open-task',{dataset:{id}});
+  }});
   render();
-  run('Открываем рабочее пространство…',async()=>{await refresh();if(startupError)throw new Error(startupError);});
+  run('Открываем рабочее пространство…',async()=>{await refresh();if(!DEMO&&collaborationPages.includes(state.page))await collaboration.load(state.page);if(startupError)throw new Error(startupError);});
 })(window.Sana);
