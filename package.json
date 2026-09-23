@@ -1,0 +1,18 @@
+{
+  "name": "ai-sana-challenge-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "dev:server": "node --watch --env-file-if-exists=.env backend/server.js",
+    "start": "node --env-file-if-exists=.env backend/server.js",
+    "test": "node --test backend/tests/*.test.js",
+    "demo": "node scripts/demo.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "zod": "^4.0.0"
+  }
+}
