@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import {
   emptyCard, createTaskSchema, updateTaskSchema, confirmationSchema, revisionSchema,
@@ -35,7 +36,6 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     return viewTask(updated);
   };
 
-  app.get('/', (_req, res) => res.type('text').send('AI Sana Challenge Hub: сервер работает. Проверка: /api/health. Каталог: /api/tasks. Интерфейс подключается отдельно.'));
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'ai-sana-challenge-hub', aiMode: ai.mode }));
   app.get('/api/rubric', (_req, res) => res.json({ fields: FIELD_LABELS, criteria: RUBRIC,
     levels: [{ min: 0, max: 39, level: 'draft' }, { min: 40, max: 69, level: 'working' }, { min: 70, max: 89, level: 'ready' }, { min: 90, max: 100, level: 'priority' }] }));
@@ -135,6 +135,8 @@ export function createApp({ store, ai, allowedOrigins = ['http://localhost:5173'
     res.json(updated);
   });
 
+  // Only public frontend assets are served. The repository root and .env stay private.
+  app.use(express.static(fileURLToPath(new URL('../frontend/', import.meta.url)), { dotfiles: 'deny', maxAge: 0 }));
   app.use((_req, _res, next) => next(new ApiError(404, 'NOT_FOUND', 'Такой адрес API не найден')));
   app.use((error, _req, res, _next) => {
     if (error instanceof ZodError) return res.status(400).json({ error: {
